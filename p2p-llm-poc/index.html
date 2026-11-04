@@ -1,0 +1,1297 @@
+<title>Browser Swarm PoC</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 상단 노드 정체성 바 + 좌측 탭 레일 + 작업 영역. 휴대폰에선 탭이 가로 스크롤 줄로 바뀜 */
+:root {
+  --bg: #f3f6f5; --surface: #ffffff; --sunk: #e9eeec; --line: #d5ddd9;
+  --fg: #16201c; --muted: #58665f; --accent: #0b7a6e; --accent-ink: #ffffff;
+  --series2: #b0541c; --ok: #2c8640; --warn: #a86d12; --bad: #bf3a2c;
+  --font-ui: "IBM Plex Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --r: 6px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1312; --surface: #151c1a; --sunk: #1b2421; --line: #27322e;
+  --fg: #e3eae7; --muted: #8e9d97; --accent: #3fbfac; --accent-ink: #06201c;
+  --series2: #e48a50; --ok: #5cc06f; --warn: #e0b04a; --bad: #ef6b5e; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e1312; --surface: #151c1a; --sunk: #1b2421; --line: #27322e;
+  --fg: #e3eae7; --muted: #8e9d97; --accent: #3fbfac; --accent-ink: #06201c;
+  --series2: #e48a50; --ok: #5cc06f; --warn: #e0b04a; --bad: #ef6b5e; color-scheme: dark }
+
+* { box-sizing: border-box }
+[hidden] { display: none !important }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 14px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 40px }
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.25 }
+h1 { font-size: 17px; font-weight: 600 }
+h2 { font-size: 19px; font-weight: 600 }
+h3 { font-size: 14px; font-weight: 600 }
+.mono, code, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums }
+.muted { color: var(--muted) }
+.small { font-size: 12.5px }
+.label { font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 500 }
+a { color: var(--accent) }
+button, select, input, textarea { font: inherit; color: inherit }
+button { cursor: pointer; border: 1px solid var(--line); background: var(--surface); border-radius: var(--r); padding: 6px 12px; min-height: 34px }
+button:hover { border-color: var(--accent) }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 500 }
+button.danger { color: var(--bad) }
+button.danger.armed { background: var(--bad); color: #fff; border-color: var(--bad) }
+button:disabled { opacity: .5; cursor: not-allowed }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+input, select, textarea { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 8px; min-height: 34px; width: 100% }
+textarea { min-height: 70px; resize: vertical }
+.field { display: grid; gap: 4px; min-width: 0 }
+.field > span { font-size: 12.5px; color: var(--muted) }
+.check { display: flex; gap: 8px; align-items: center }
+.check input { width: auto; min-height: 0 }
+
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding-block: 12px }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg) }
+.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0 }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px; background: var(--surface); white-space: nowrap }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none }
+.dot.ok { background: var(--ok) } .dot.warn { background: var(--warn) } .dot.bad { background: var(--bad) }
+
+.shell { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 24px; margin-top: 18px }
+nav.tabs { display: flex; flex-direction: column; gap: 2px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 72px); align-self: start }
+nav.tabs a { text-decoration: none; color: var(--fg); padding: 7px 10px; border-radius: var(--r); display: flex; justify-content: space-between; gap: 8px }
+nav.tabs a:hover { background: var(--sunk) }
+nav.tabs a[aria-current="page"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); font-weight: 600 }
+nav.tabs .n { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted) }
+main { min-width: 0 }
+section.view { display: grid; gap: 18px }
+.view-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: end; justify-content: space-between }
+.view-head p { margin: 4px 0 0; max-width: 68ch }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 12px; min-width: 0 }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden }
+.tile { background: var(--surface); padding: 12px 14px; display: grid; gap: 2px }
+.tile .v { font-family: var(--font-mono); font-size: 22px; font-weight: 500; font-variant-numeric: tabular-nums }
+.tile .v small { font-size: 12px; color: var(--muted); font-weight: 400 }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r) }
+table { border-collapse: collapse; width: 100%; font-size: 13px; background: var(--surface) }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: top }
+th { font-size: 11.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-weight: 500; background: var(--sunk) }
+td.num, th.num { text-align: right }
+tr:last-child td { border-bottom: 0 }
+td.wrap { white-space: normal; min-width: 220px }
+
+.pill { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap }
+.pill.ok { color: var(--ok) } .pill.warn { color: var(--warn) } .pill.bad { color: var(--bad) } .pill.mute { color: var(--muted) } .pill.acc { color: var(--accent) }
+
+.nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px }
+.node { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; display: grid; gap: 10px; min-width: 0 }
+.node.me { border-color: var(--accent) }
+.node-h { display: flex; justify-content: space-between; gap: 8px; align-items: start }
+.node-h b { overflow-wrap: anywhere }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px }
+.kv dt { color: var(--muted) } .kv dd { margin: 0; font-family: var(--font-mono); text-align: right; overflow-wrap: anywhere }
+.bar { height: 6px; background: var(--sunk); border-radius: 3px; overflow: hidden }
+.bar > i { display: block; height: 100%; background: var(--accent) }
+.spark { width: 100%; height: 34px; display: block }
+
+.log { font-family: var(--font-mono); font-size: 12px; background: var(--sunk); border-radius: var(--r); padding: 10px; max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere }
+.log .e { color: var(--bad) } .log .w { color: var(--warn) } .log .i { color: var(--fg) } .log .d { color: var(--muted) }
+
+.phases { display: grid; gap: 10px }
+.phase { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: grid; gap: 8px }
+.phase-h { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center }
+.phase-h .idx { font-family: var(--font-mono); color: var(--muted); font-size: 12px }
+.phase-h select { width: auto; min-height: 28px; padding: 2px 6px; margin-left: auto }
+.phase ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px }
+.phase textarea { min-height: 44px }
+.progress { display: flex; gap: 3px }
+.progress i { flex: 1; height: 8px; border-radius: 2px; background: var(--sunk) }
+.progress i.done { background: var(--ok) } .progress i.doing { background: var(--accent) } .progress i.blocked { background: var(--bad) }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px; display: grid; gap: 8px; min-width: 0 }
+.card.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent) }
+.notice { border-left: 3px solid var(--warn); background: var(--sunk); padding: 10px 12px; border-radius: 0 var(--r) var(--r) 0; font-size: 13px }
+.notice.info { border-left-color: var(--accent) }
+.code-box { font-family: var(--font-mono); font-size: 11.5px; min-height: 90px; word-break: break-all }
+.toast { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: var(--r); font-size: 13px; z-index: 20 }
+.chart svg { width: 100%; height: auto; display: block }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted) }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px }
+details summary { cursor: pointer }
+
+@media (max-width: 820px) {
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 14px }
+  nav.tabs { flex-direction: row; overflow-x: auto; position: static; padding-bottom: 4px }
+  nav.tabs a { white-space: nowrap }
+  .grid2, .grid3 { grid-template-columns: minmax(0, 1fr) }
+  .chips { margin-left: 0 }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important } }
+</style>
+
+<header class="top">
+  <div class="brand">
+    <h1>Browser Swarm PoC</h1>
+    <span class="muted small">브라우저 한 탭 = 노드 하나</span>
+  </div>
+  <div class="chips" id="chips"></div>
+</header>
+
+<div class="shell">
+  <nav class="tabs" id="tabs" aria-label="화면">
+    <a href="#overview" data-v="overview">개요 <span class="n" id="n-overview"></span></a>
+    <a href="#nodes" data-v="nodes">노드 <span class="n" id="n-nodes"></span></a>
+    <a href="#connect" data-v="connect">연결 <span class="n" id="n-connect"></span></a>
+    <a href="#queue" data-v="queue">작업 큐 <span class="n" id="n-queue"></span></a>
+    <a href="#experiments" data-v="experiments">실험 설정 <span class="n" id="n-experiments"></span></a>
+    <a href="#runs" data-v="runs">실행 기록 <span class="n" id="n-runs"></span></a>
+    <a href="#models" data-v="models">모델 비교 <span class="n" id="n-models"></span></a>
+    <a href="#poc" data-v="poc">PoC 단계 <span class="n" id="n-poc"></span></a>
+    <a href="#notes" data-v="notes">설계 메모 <span class="n" id="n-notes"></span></a>
+  </nav>
+
+  <main>
+    <!-- 개요 -->
+    <section class="view" id="v-overview">
+      <div class="view-head">
+        <div><h2>개요</h2><p class="muted">지금 연결된 노드와 자원, 큐 상태, PoC 진행률을 한눈에 봅니다. 기준 환경은 Windows 11 노트북 + RTX 4070 Laptop 8GB입니다.</p></div>
+      </div>
+      <div class="tiles" id="ov-tiles"></div>
+      <div class="grid2">
+        <div class="panel">
+          <h3>기준 환경 제약</h3>
+          <div class="kv" id="ov-constraints"></div>
+          <p class="small muted" style="margin:0">브라우저는 VRAM 용량을 알려주지 않으므로 노드 프로필의 값을 씁니다. WebGPU 버퍼 한도와 실측 대역폭은 노드 화면에서 측정합니다.</p>
+        </div>
+        <div class="panel">
+          <div class="row" style="justify-content:space-between"><h3>PoC 진행</h3><a href="#poc" class="small">단계 관리</a></div>
+          <div class="progress" id="ov-progress"></div>
+          <div id="ov-phase-list" class="small"></div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <div class="row" style="justify-content:space-between"><h3>최근 실행</h3><a href="#runs" class="small">전체 기록</a></div>
+          <div id="ov-runs"></div>
+        </div>
+        <div class="panel">
+          <h3>세션 로그</h3>
+          <div class="log" id="ov-log"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 노드 -->
+    <section class="view" id="v-nodes" hidden>
+      <div class="view-head">
+        <div><h2>노드 대시보드</h2><p class="muted">이 탭이 곧 노드입니다. 같은 페이지를 연 다른 브라우저가 자동으로 나타납니다. 지연시간은 3초마다 핑으로 측정하고, 안정성은 최근 20회 핑의 성공률과 지터로 계산합니다.</p></div>
+      </div>
+      <div class="panel">
+        <h3>내 노드 설정</h3>
+        <div class="form-grid">
+          <label class="field"><span>노드 이름</span><input id="me-name" maxlength="40"></label>
+          <label class="field"><span>하드웨어 프로필</span><select id="me-preset"></select></label>
+          <label class="field"><span>VRAM (GB, 수동)</span><input id="me-vram" type="number" min="0" step="0.5"></label>
+          <label class="field"><span>시스템 RAM (GB)</span><input id="me-ram" type="number" min="1" step="1"></label>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="me-accept" checked> 다른 노드의 작업 받기</label>
+          <button id="btn-gpu">WebGPU 다시 감지</button>
+          <button id="btn-bw">GPU 대역폭 측정</button>
+          <span class="small muted" id="bw-status"></span>
+        </div>
+        <details>
+          <summary class="small">WebLLM 실추론 (선택)</summary>
+          <div style="display:grid;gap:8px;margin-top:8px">
+            <p class="small muted" style="margin:0">jsDelivr에서 WebLLM을 불러오고 Hugging Face에서 모델 가중치를 받습니다. Sites 안에서는 가중치 다운로드가 막힐 가능성이 높습니다. 그럴 때는 저장소의 <code>p2p-llm-poc/index.html</code>을 로컬에서 열어 쓰세요.</p>
+            <div class="row">
+              <select id="webllm-model" style="width:auto"></select>
+              <button id="btn-webllm">불러오기 시도</button>
+              <span class="small mono" id="webllm-status">미사용 (시뮬레이터로 실행)</span>
+            </div>
+          </div>
+        </details>
+      </div>
+      <div class="nodes" id="node-grid"></div>
+    </section>
+
+    <!-- 연결 -->
+    <section class="view" id="v-connect" hidden>
+      <div class="view-head">
+        <div><h2>노드 연결</h2><p class="muted">연결 경로는 두 가지입니다. 실행 환경에서 쓸 수 있는 경로가 자동으로 켜집니다.</p></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <div class="row" style="justify-content:space-between"><h3>Sites room 중계</h3><span id="room-pill"></span></div>
+          <p class="small" style="margin:0">Sites에 게시된 페이지를 연 사람끼리 자동으로 연결됩니다. 메시지는 Sites 서버를 거치므로 측정되는 RTT에 중계 지연이 포함됩니다. 작업을 보내려면 아티팩트 공유 설정에서 참여자에게 Contributor 이상 권한이 있어야 합니다.</p>
+        </div>
+        <div class="panel">
+          <div class="row" style="justify-content:space-between"><h3>WebRTC DataChannel</h3><span id="rtc-pill"></span></div>
+          <p class="small" style="margin:0">Sites 페이지 안에서는 WebRTC가 차단됩니다. 저장소의 HTML 파일을 Chrome이나 Edge에서 직접 열면 사용할 수 있습니다. 시그널링은 아래에서 코드를 복사해 상대에게 전달하는 방식입니다(메신저 등으로 전달).</p>
+        </div>
+      </div>
+      <div class="panel" id="rtc-panel">
+        <h3>수동 시그널링</h3>
+        <div class="grid2">
+          <div style="display:grid;gap:8px;min-width:0">
+            <div class="label">A. 연결을 시작하는 쪽</div>
+            <div class="row"><button id="rtc-offer" class="primary">1. 오퍼 만들기</button><button id="rtc-copy-offer">복사</button></div>
+            <textarea id="rtc-offer-out" class="code-box" readonly placeholder="오퍼 코드가 여기 나타납니다"></textarea>
+            <textarea id="rtc-answer-in" class="code-box" placeholder="상대가 보낸 응답 코드를 붙여넣기"></textarea>
+            <button id="rtc-apply">3. 응답 적용</button>
+          </div>
+          <div style="display:grid;gap:8px;min-width:0">
+            <div class="label">B. 오퍼를 받은 쪽</div>
+            <textarea id="rtc-offer-in" class="code-box" placeholder="받은 오퍼 코드를 붙여넣기"></textarea>
+            <div class="row"><button id="rtc-answer" class="primary">2. 응답 만들기</button><button id="rtc-copy-answer">복사</button></div>
+            <textarea id="rtc-answer-out" class="code-box" readonly placeholder="응답 코드가 여기 나타납니다. A에게 전달하세요"></textarea>
+          </div>
+        </div>
+        <div class="small muted">STUN: stun.l.google.com:19302. 같은 Wi-Fi/LAN에서는 STUN 없이도 연결됩니다. 회사망처럼 대칭 NAT 뒤에 있으면 TURN 서버가 필요할 수 있습니다.</div>
+        <div id="rtc-conns" class="small"></div>
+      </div>
+    </section>
+
+    <!-- 큐 -->
+    <section class="view" id="v-queue" hidden>
+      <div class="view-head">
+        <div><h2>작업 큐와 분배</h2><p class="muted">추론 요청을 큐에 넣고 분배 전략에 따라 노드에 보냅니다. 노드가 응답하지 않으면 시간 초과 후 다른 노드로 재시도합니다.</p></div>
+      </div>
+      <div class="panel">
+        <div class="form-grid">
+          <label class="field" style="grid-column:1/-1"><span>프롬프트</span><textarea id="q-prompt">분산 추론에서 파이프라인 병렬화와 데이터 병렬화의 차이를 세 문장으로 설명해줘.</textarea></label>
+          <label class="field"><span>모델</span><select id="q-model"></select></label>
+          <label class="field"><span>분배 전략</span><select id="q-strategy"></select></label>
+          <label class="field"><span>입력 토큰(추정)</span><input id="q-ptok" type="number" value="64" min="1"></label>
+          <label class="field"><span>최대 생성 토큰</span><input id="q-max" type="number" value="128" min="1" max="2048"></label>
+          <label class="field"><span>개수</span><input id="q-count" type="number" value="4" min="1" max="200"></label>
+          <label class="field"><span>동시 실행</span><input id="q-conc" type="number" value="2" min="1" max="16"></label>
+          <label class="field"><span>시뮬레이션 배속</span><select id="q-speed"><option value="1">1× (실시간)</option><option value="5" selected>5×</option><option value="20">20×</option></select></label>
+        </div>
+        <div class="row">
+          <button class="primary" id="q-add">큐에 추가</button>
+          <button id="q-pause">일시 정지</button>
+          <button id="q-clear">완료 항목 지우기</button>
+          <button id="q-save">현재 큐를 실행 기록으로 저장</button>
+          <span class="small muted" id="q-plan"></span>
+        </div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>상태</th><th>모델</th><th>전략</th><th>배정 노드</th><th class="num">TTFT ms</th><th class="num">tok/s</th><th class="num">E2E ms</th><th class="num">재시도</th><th>실행기</th></tr></thead>
+        <tbody id="q-body"></tbody>
+      </table></div>
+    </section>
+
+    <!-- 실험 -->
+    <section class="view" id="v-experiments" hidden>
+      <div class="view-head">
+        <div><h2>실험 설정</h2><p class="muted">설정을 저장해 두고 같은 조건으로 다시 실행합니다. 실행하면 결과가 실행 기록에 남습니다.</p></div>
+        <button id="exp-new">새 설정</button>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h3 id="exp-form-title">새 실험</h3>
+          <div class="form-grid">
+            <label class="field" style="grid-column:1/-1"><span>이름</span><input id="e-name" maxlength="80"></label>
+            <label class="field"><span>모델</span><select id="e-model"></select></label>
+            <label class="field"><span>분배 전략</span><select id="e-strategy"></select></label>
+            <label class="field"><span>요청 수</span><input id="e-n" type="number" min="1" max="200"></label>
+            <label class="field"><span>동시 실행</span><input id="e-conc" type="number" min="1" max="16"></label>
+            <label class="field"><span>입력 토큰</span><input id="e-ptok" type="number" min="1"></label>
+            <label class="field"><span>생성 토큰</span><input id="e-max" type="number" min="1" max="2048"></label>
+            <label class="field"><span>배속</span><select id="e-speed"><option value="1">1×</option><option value="5">5×</option><option value="20">20×</option></select></label>
+            <label class="field"><span>시간 초과(초)</span><input id="e-timeout" type="number" min="5" max="600"></label>
+            <label class="field"><span>재시도 횟수</span><input id="e-retries" type="number" min="0" max="5"></label>
+            <label class="field" style="grid-column:1/-1"><span>프롬프트</span><textarea id="e-prompt"></textarea></label>
+            <label class="field" style="grid-column:1/-1"><span>메모 (가설, 관찰할 것)</span><textarea id="e-notes"></textarea></label>
+            <label class="check" style="grid-column:1/-1"><input type="checkbox" id="e-real"> WebLLM이 로드된 노드는 실추론 사용</label>
+          </div>
+          <div class="row">
+            <button class="primary" id="e-save">저장</button>
+            <button id="e-run">저장 후 실행</button>
+            <span class="small muted" id="e-msg"></span>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>저장된 설정</h3>
+          <div class="cards" id="exp-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 실행 기록 -->
+    <section class="view" id="v-runs" hidden>
+      <div class="view-head">
+        <div><h2>실행 기록과 결과 비교</h2><p class="muted">두 개를 선택하면 아래에서 지표를 나란히 비교합니다. 행을 펼치면 실행 로그를 볼 수 있습니다.</p></div>
+        <div class="row"><button id="btn-export">JSON 내보내기</button><button id="btn-import-toggle">가져오기</button></div>
+      </div>
+      <div class="panel" id="import-panel" hidden>
+        <h3>JSON 가져오기</h3>
+        <textarea id="import-text" class="code-box" placeholder="내보낸 JSON을 붙여넣거나 파일을 고르세요"></textarea>
+        <div class="row"><input type="file" id="import-file" accept="application/json,.json" style="width:auto"><button class="primary" id="btn-import">가져오기</button></div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>시작</th><th>실험</th><th>모델</th><th>전략</th><th class="num">노드</th><th class="num">성공</th><th class="num">평균 TTFT</th><th class="num">평균 tok/s</th><th class="num">p95 E2E</th><th class="num">처리량 tok/s</th><th></th></tr></thead>
+        <tbody id="runs-body"></tbody>
+      </table></div>
+      <div class="panel" id="cmp-panel">
+        <h3>비교</h3>
+        <div id="cmp"></div>
+      </div>
+    </section>
+
+    <!-- 모델 비교 -->
+    <section class="view" id="v-models" hidden>
+      <div class="view-head">
+        <div><h2>모델별 성능 비교</h2><p class="muted">실행 기록의 측정값과, 현재 연결된 노드 기준 예측값을 함께 봅니다. 예측은 메모리 대역폭 한계 모델(디코딩 tok/s ≈ 유효 대역폭 ÷ 가중치 크기)로 계산합니다.</p></div>
+      </div>
+      <div class="panel chart">
+        <div class="row" style="justify-content:space-between"><h3>디코딩 속도 (tok/s)</h3><div class="legend"><span><i style="background:var(--accent)"></i>측정 평균</span><span><i style="background:var(--series2)"></i>예측 (최적 단일 노드)</span></div></div>
+        <div id="model-chart"></div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>모델</th><th class="num">가중치 GB</th><th>내 노드 적재</th><th>스웜 적재</th><th class="num">예측 tok/s</th><th class="num">예측 파이프라인 tok/s</th><th class="num">측정 n</th><th class="num">측정 tok/s</th><th class="num">측정 TTFT</th><th class="num">성공률</th></tr></thead>
+        <tbody id="models-body"></tbody>
+      </table></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>모델 × 전략</th><th class="num">n</th><th class="num">tok/s</th><th class="num">TTFT ms</th><th class="num">p95 E2E ms</th><th class="num">성공률</th></tr></thead>
+        <tbody id="ms-body"></tbody>
+      </table></div>
+    </section>
+
+    <!-- PoC -->
+    <section class="view" id="v-poc" hidden>
+      <div class="view-head">
+        <div><h2>단계별 PoC 진행 현황</h2><p class="muted">상태와 체크 항목, 메모를 바꾸면 바로 저장됩니다. 공유 DB를 쓰는 경우 참여자 모두가 같은 현황을 봅니다.</p></div>
+        <span class="small muted" id="poc-saved"></span>
+      </div>
+      <div class="phases" id="phases"></div>
+    </section>
+
+    <!-- 메모 -->
+    <section class="view" id="v-notes" hidden>
+      <div class="view-head">
+        <div><h2>SwarmLLM과 현재 설계의 차이</h2><p class="muted">항목별로 두 설계를 비교하고 PoC에 주는 영향을 적어 둡니다. 칸을 고치면 저장됩니다.</p></div>
+        <div class="row"><button id="note-add">항목 추가</button><span class="small muted" id="note-saved"></span></div>
+      </div>
+      <div class="notice">SwarmLLM 열의 처음 내용은 일반적인 스웜형 분산 추론 설계(설치형 GPU 서버 노드, DHT 피어 탐색, 블록 단위 파이프라인)를 가정해 채운 초안입니다. 실제 SwarmLLM 문서와 대조해 고쳐 주세요.</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>항목</th><th>SwarmLLM</th><th>현재 설계 (Browser Swarm PoC)</th><th>PoC에 주는 영향</th><th></th></tr></thead>
+        <tbody id="notes-body"></tbody>
+      </table></div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+"use strict";
+// ---------- 유틸 ----------
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const uid = (p = "") => p + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+const fmt = (v, d = 0) => (v == null || !isFinite(v)) ? "–" : Number(v).toLocaleString("ko-KR", { maximumFractionDigits: d, minimumFractionDigits: d });
+const median = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const pct = (a, p) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
+const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+const ls = {
+  get(k, d) { try { const v = localStorage.getItem("bsp:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("bsp:" + k, JSON.stringify(v)); } catch {} }
+};
+const use = name => (window.claude && typeof window.claude.use === "function") ? window.claude.use(name).catch(() => null) : Promise.resolve(null);
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 2600); }
+function timeStr(ts) { const d = new Date(ts); return d.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }); }
+
+// ---------- 카탈로그 ----------
+// 하드웨어 프로필: bw=메모리 대역폭 GB/s, tflops=WebGPU에서 기대할 FP16 셰이더 연산, eff=브라우저 실효 비율, usable=VRAM 중 브라우저가 쓸 수 있는 비율(추정)
+const PRESETS = {
+  rtx4070l: { label: "RTX 4070 Laptop 8GB (기준)", vram: 8, ram: 16, bw: 256, tflops: 15, eff: 0.45, usable: 0.7 },
+  rtx3060:  { label: "RTX 3060 12GB 데스크톱", vram: 12, ram: 32, bw: 360, tflops: 12, eff: 0.45, usable: 0.75 },
+  apple:    { label: "Apple M2 16GB (통합 메모리)", vram: 10, ram: 16, bw: 100, tflops: 3.6, eff: 0.5, usable: 0.65 },
+  igpu:     { label: "Intel/AMD 내장 GPU", vram: 4, ram: 16, bw: 60, tflops: 2, eff: 0.4, usable: 0.5 },
+  cpu:      { label: "CPU 전용 (WebGPU 없음)", vram: 0, ram: 16, bw: 40, tflops: 0.4, eff: 0.25, usable: 0.35 }
+};
+// 모델: params(B), layers, bits(가중치 평균 비트), webllm id
+const MODELS = {
+  "qwen2.5-0.5b": { label: "Qwen2.5 0.5B q4", params: 0.49, layers: 24, bits: 4.5, webllm: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC" },
+  "llama3.2-1b":  { label: "Llama 3.2 1B q4", params: 1.24, layers: 16, bits: 4.5, webllm: "Llama-3.2-1B-Instruct-q4f16_1-MLC" },
+  "llama3.2-3b":  { label: "Llama 3.2 3B q4", params: 3.21, layers: 28, bits: 4.5, webllm: "Llama-3.2-3B-Instruct-q4f16_1-MLC" },
+  "phi3.5-mini":  { label: "Phi-3.5 mini 3.8B q4", params: 3.82, layers: 32, bits: 4.5, webllm: "Phi-3.5-mini-instruct-q4f16_1-MLC" },
+  "llama3.1-8b":  { label: "Llama 3.1 8B q4", params: 8.03, layers: 32, bits: 4.5, webllm: "Llama-3.1-8B-Instruct-q4f16_1-MLC" },
+  "qwen2.5-14b":  { label: "Qwen2.5 14B q4 (분할 전용)", params: 14.8, layers: 48, bits: 4.5, webllm: null }
+};
+const STRATEGIES = {
+  local: "내 노드만",
+  rr: "라운드 로빈",
+  least: "부하 최소",
+  latency: "지연 최소",
+  weighted: "예상 속도 가중",
+  pipeline: "레이어 분할 (파이프라인)"
+};
+const weightGB = m => m.params * m.bits / 8 * 1.05;
+
+// 노드 정보(info)로 모델 실행 예측. frac = 맡는 레이어 비율
+function estimate(info, m, frac = 1) {
+  const p = PRESETS[info.preset] || PRESETS.rtx4070l;
+  const onGpu = info.webgpu && info.vram > 0;
+  const memBudget = onGpu ? info.vram * p.usable : info.ram * 0.35;
+  const need = weightGB(m) * frac + 0.35 + 0.15 * frac; // 가중치 + 런타임 + KV(짧은 문맥)
+  const bufLimitGB = info.maxBuffer ? info.maxBuffer / 1e9 : null;
+  const bwEff = info.measuredBw ? info.measuredBw * 0.6 : p.bw * p.eff;
+  const tps = bwEff / (weightGB(m) * frac);
+  const prefillTps = (p.tflops * p.eff * 1e12) / (2 * m.params * 1e9 * frac);
+  return { fits: need <= memBudget, need, memBudget, tps, prefillTps, perTokMs: 1000 / tps, bufLimitGB };
+}
+
+// ---------- 상태 ----------
+const nodeId = (() => { try { let v = sessionStorage.getItem("bsp:node"); if (!v) { v = uid("n"); sessionStorage.setItem("bsp:node", v); } return v; } catch { return uid("n"); } })();
+const S = {
+  me: {
+    nodeId, name: ls.get("name", "노드-" + nodeId.slice(1, 5)), preset: ls.get("preset", "rtx4070l"),
+    vram: ls.get("vram", 8), ram: ls.get("ram", navigator.deviceMemory ? Math.max(navigator.deviceMemory, 8) : 16),
+    cores: navigator.hardwareConcurrency || null, webgpu: false, gpuDesc: "", maxBuffer: null, f16: false,
+    measuredBw: ls.get("bw", null), accept: true, load: 0, done: 0, webllm: null,
+    ua: (navigator.userAgentData?.platform || navigator.platform || "") + " · " + (/Edg\//.test(navigator.userAgent) ? "Edge" : /Chrome\//.test(navigator.userAgent) ? "Chrome" : /Firefox\//.test(navigator.userAgent) ? "Firefox" : /Safari\//.test(navigator.userAgent) ? "Safari" : "기타")
+  },
+  peers: new Map(),   // key -> {key, via, info, samples:[rtt|null], lastSeen, since}
+  room: null, roomOk: false, myPeer: null,
+  rtcAvailable: false,
+  queue: [], paused: false, running: 0, rrIdx: 0, seq: 0,
+  experiments: [], runs: [], meta: {}, storeMode: "확인 중",
+  log: [], editingExp: null, selectedRuns: [], openRun: null,
+  pendingTasks: new Map(), pendingPings: new Map()
+};
+
+function log(level, msg) {
+  const line = { t: Date.now(), level, msg };
+  S.log.push(line); if (S.log.length > 500) S.log.shift();
+  for (const r of S.queueRuns()) { r.log.push(line); if (r.log.length > 300) r.log.shift(); }
+  schedule();
+}
+S.queueRuns = () => [...activeRuns.values()];
+const activeRuns = new Map();
+
+// ---------- 저장소: 공유 DB 또는 브라우저 로컬 ----------
+const Store = {
+  db: null, subs: {},
+  async init() {
+    this.db = await use("db");
+    S.storeMode = this.db ? "공유 DB" : "브라우저 로컬";
+    for (const c of ["experiments", "runs", "meta"]) this.watch(c);
+    schedule();
+  },
+  watch(coll) {
+    const apply = rows => {
+      if (coll === "meta") { S.meta = Object.fromEntries(rows.map(r => [r.id, r])); }
+      else { S[coll] = rows.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); }
+      schedule();
+    };
+    if (this.db) {
+      const timer = setTimeout(() => log("w", `${coll}: 공유 DB 응답이 늦습니다`), 10000);
+      this.db.collection(coll).onSnapshot(s => { clearTimeout(timer); apply(s.docs.map(d => ({ ...d.data(), id: d.id }))); },
+        e => { clearTimeout(timer); log("e", `${coll} 구독 실패: ${e.message || e.code}`); });
+    } else {
+      this.subs[coll] = apply;
+      apply(Object.values(ls.get("db:" + coll, {})));
+    }
+  },
+  async put(coll, id, data) {
+    const body = JSON.parse(JSON.stringify({ ...data, id: undefined }));
+    if (this.db) { try { await this.db.collection(coll).doc(id).set(body); } catch (e) { log("e", `저장 실패 (${coll}/${id}): ${e.message || e.code}`); toast("저장하지 못했습니다. 이 아티팩트에 쓰기 권한이 있는지 확인하세요."); throw e; } }
+    else { const all = ls.get("db:" + coll, {}); all[id] = { ...body, id }; ls.set("db:" + coll, all); this.subs[coll](Object.values(all)); }
+  },
+  async del(coll, id) {
+    if (this.db) { try { await this.db.collection(coll).doc(id).delete(); } catch (e) { log("e", `삭제 실패: ${e.message || e.code}`); } }
+    else { const all = ls.get("db:" + coll, {}); delete all[id]; ls.set("db:" + coll, all); this.subs[coll](Object.values(all)); }
+  }
+};
+
+// ---------- 내 노드 정보 ----------
+function myInfo() {
+  const m = S.me;
+  return { nodeId: m.nodeId, name: m.name, preset: m.preset, vram: +m.vram || 0, ram: +m.ram || 0, cores: m.cores,
+    webgpu: m.webgpu, gpu: (m.gpuDesc || "").slice(0, 80), maxBuffer: m.maxBuffer, measuredBw: m.measuredBw,
+    accept: m.accept, load: m.load, done: m.done, webllm: m.webllm?.model || null, ua: m.ua.slice(0, 60), v: 1 };
+}
+let infoTimer;
+function broadcastInfo() {
+  clearTimeout(infoTimer);
+  infoTimer = setTimeout(() => {
+    const info = myInfo();
+    if (S.room) S.room.presence({ node: info }).catch(() => {});
+    for (const p of S.peers.values()) if (p.via === "rtc") rtcSend(p, { t: "info", info });
+  }, 150);
+  schedule();
+}
+
+async function detectGPU() {
+  const m = S.me;
+  if (!navigator.gpu) { m.webgpu = false; m.gpuDesc = "WebGPU 미지원"; log("w", "navigator.gpu 없음: CPU 프로필로 예측합니다"); broadcastInfo(); return; }
+  try {
+    const a = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    if (!a) throw new Error("어댑터를 받지 못했습니다");
+    const info = a.info || (a.requestAdapterInfo ? await a.requestAdapterInfo() : {});
+    m.webgpu = true;
+    m.gpuDesc = [info.vendor, info.architecture, info.description].filter(Boolean).join(" ") || "WebGPU 어댑터";
+    m.maxBuffer = a.limits.maxBufferSize; m.f16 = a.features.has("shader-f16");
+    log("i", `WebGPU: ${m.gpuDesc} · maxBuffer ${(m.maxBuffer / 2 ** 30).toFixed(2)} GiB · f16 ${m.f16 ? "지원" : "미지원"}`);
+    if (/intel/i.test(info.vendor || "") && m.preset === "rtx4070l") log("w", "내장 GPU 어댑터가 선택됐습니다. Windows 설정 > 디스플레이 > 그래픽에서 브라우저를 '고성능'으로 지정하세요.");
+  } catch (e) { m.webgpu = false; m.gpuDesc = "감지 실패"; log("e", "WebGPU 감지 실패: " + e.message); }
+  broadcastInfo();
+}
+
+// GPU 복사 대역폭 측정: 128MiB 버퍼를 반복 복사해 GB/s 산출 (읽기+쓰기)
+async function measureBandwidth() {
+  const st = $("#bw-status");
+  if (!navigator.gpu) { st.textContent = "WebGPU가 없어 측정할 수 없습니다"; return; }
+  st.textContent = "측정 중…";
+  try {
+    const a = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    const dev = await a.requestDevice();
+    const size = Math.min(128 * 2 ** 20, a.limits.maxBufferSize);
+    const usage = GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+    const b1 = dev.createBuffer({ size, usage }), b2 = dev.createBuffer({ size, usage });
+    const run = async n => { const enc = dev.createCommandEncoder(); for (let i = 0; i < n; i++) enc.copyBufferToBuffer(i % 2 ? b2 : b1, 0, i % 2 ? b1 : b2, 0, size); dev.queue.submit([enc.finish()]); await dev.queue.onSubmittedWorkDone(); };
+    await run(4);
+    const N = 40, t0 = performance.now(); await run(N); const ms = performance.now() - t0;
+    const gbs = (2 * size * N) / (ms / 1000) / 1e9;
+    S.me.measuredBw = Math.round(gbs); ls.set("bw", S.me.measuredBw);
+    b1.destroy(); b2.destroy(); dev.destroy();
+    st.textContent = `복사 대역폭 ${fmt(gbs)} GB/s (예측에 60% 반영)`;
+    log("i", `GPU 대역폭 측정: ${fmt(gbs, 1)} GB/s`);
+    broadcastInfo();
+  } catch (e) { st.textContent = "측정 실패: " + e.message; log("e", "대역폭 측정 실패: " + e.message); }
+}
+
+// ---------- WebLLM (선택) ----------
+async function loadWebLLM() {
+  const key = $("#webllm-model").value, m = MODELS[key], st = $("#webllm-status");
+  if (!m.webllm) return;
+  st.textContent = "라이브러리 불러오는 중…";
+  try {
+    const lib = await import("https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.78/+esm");
+    const engine = await lib.CreateMLCEngine(m.webllm, { initProgressCallback: p => { st.textContent = p.text.slice(0, 90); } });
+    S.me.webllm = { model: key, engine };
+    st.textContent = `${m.label} 로드 완료 · 실추론 가능`;
+    log("i", `WebLLM 로드: ${m.webllm}`);
+    broadcastInfo();
+  } catch (e) {
+    st.textContent = "실패: " + String(e.message || e).slice(0, 120);
+    log("e", "WebLLM 로드 실패 (Sites에서는 가중치 다운로드가 차단될 수 있음): " + (e.message || e));
+  }
+}
+
+// ---------- 실행기: 노드가 받은 작업 수행 ----------
+async function executeTask(task) {
+  const m = MODELS[task.model];
+  if (!m) return { ok: false, error: "알 수 없는 모델" };
+  S.me.load++; broadcastInfo();
+  try {
+    if (task.real && !task.stage && S.me.webllm?.model === task.model) {
+      const t0 = performance.now(); let first = null, tokens = 0, text = "";
+      const chunks = await S.me.webllm.engine.chat.completions.create({ messages: [{ role: "user", content: task.prompt || "안녕" }], max_tokens: task.maxTokens, stream: true, stream_options: { include_usage: true } });
+      for await (const c of chunks) { const d = c.choices?.[0]?.delta?.content; if (d) { if (first == null) first = performance.now(); text += d; } if (c.usage) tokens = c.usage.completion_tokens; }
+      const end = performance.now(); first ??= end;
+      tokens = tokens || Math.max(1, Math.round(text.length / 2));
+      return { ok: true, executor: "webllm", ttftMs: first - t0, decodeMs: end - first, tokens, tps: tokens / Math.max(0.001, (end - first) / 1000), text: text.slice(0, 400) };
+    }
+    const est = estimate(myInfo(), m, task.frac || 1);
+    if (!est.fits) return { ok: false, error: `메모리 부족 (필요 ${est.need.toFixed(1)}GB > 가용 ${est.memBudget.toFixed(1)}GB)` };
+    const jit = () => 1 + (Math.random() - 0.5) * 0.16;
+    const prefillMs = (task.promptTokens / est.prefillTps) * 1000 * jit() + 15;
+    const perTokMs = est.perTokMs * jit();
+    const decodeMs = perTokMs * task.maxTokens;
+    await sleep((prefillMs + decodeMs) / (task.speed || 1));
+    return { ok: true, executor: "sim", ttftMs: prefillMs, decodeMs, perTokMs, prefillMs, tokens: task.maxTokens, tps: 1000 / perTokMs };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+  finally { S.me.load--; S.me.done++; broadcastInfo(); }
+}
+
+// ---------- 피어 관리 ----------
+function upsertPeer(key, via, info, extra = {}) {
+  let p = S.peers.get(key);
+  if (!p) { p = { key, via, info, samples: [], since: Date.now(), lastSeen: Date.now(), ...extra }; S.peers.set(key, p); log("i", `노드 합류: ${info.name} (${via === "room" ? "room" : "WebRTC"})`); }
+  else { p.info = info; p.lastSeen = Date.now(); Object.assign(p, extra); }
+  schedule();
+  return p;
+}
+function removePeer(key, why = "이탈") {
+  const p = S.peers.get(key); if (!p) return;
+  S.peers.delete(key); log("w", `노드 ${why}: ${p.info.name}`);
+  for (const [id, t] of S.pendingTasks) if (t.peerKey === key) { clearTimeout(t.timer); S.pendingTasks.delete(id); t.reject(new Error("노드 이탈")); }
+  schedule();
+}
+function peerRtt(p) { const ok = p.samples.filter(x => x != null); return median(ok.slice(-10)); }
+function peerStability(p) {
+  const s = p.samples.slice(-20); if (!s.length) return null;
+  const ok = s.filter(x => x != null);
+  const succ = ok.length / s.length;
+  const jitter = ok.length > 2 ? avg(ok.slice(1).map((v, i) => Math.abs(v - ok[i]))) : 0;
+  const med = median(ok) || 1;
+  const score = succ * (1 - Math.min(0.5, jitter / (med * 2)));
+  return { score, succ, jitter };
+}
+
+function sendTo(p, type, data) {
+  if (p.via === "room") return S.room.emit(type, { ...data, to: p.peer });
+  return Promise.resolve(rtcSend(p, { t: type, ...data }));
+}
+function onMessage(fromKey, type, data, reply) {
+  const p = S.peers.get(fromKey);
+  if (type === "ping") reply("pong", { id: data.id });
+  else if (type === "pong") {
+    const t = S.pendingPings.get(data.id); if (!t) return;
+    S.pendingPings.delete(data.id); clearTimeout(t.timer);
+    if (p) { p.samples.push(performance.now() - t.t0); if (p.samples.length > 60) p.samples.shift(); p.lastSeen = Date.now(); schedule(); }
+  } else if (type === "task") {
+    if (!S.me.accept) { reply("result", { taskId: data.taskId, ok: false, error: "작업 수락 꺼짐" }); return; }
+    log("d", `작업 수신 ${data.taskId.slice(-5)} (${data.model}${data.stage ? `, 레이어 ${Math.round(data.frac * 100)}%` : ""})`);
+    executeTask(data).then(res => reply("result", { taskId: data.taskId, ...res, text: res.text ? res.text.slice(0, 1500) : undefined }));
+  } else if (type === "result") {
+    const t = S.pendingTasks.get(data.taskId); if (!t) return;
+    S.pendingTasks.delete(data.taskId); clearTimeout(t.timer); t.resolve(data);
+  }
+}
+function pingAll() {
+  for (const p of S.peers.values()) {
+    const id = uid("p"); const t0 = performance.now();
+    const timer = setTimeout(() => { S.pendingPings.delete(id); p.samples.push(null); if (p.samples.length > 60) p.samples.shift(); schedule(); }, 5000);
+    S.pendingPings.set(id, { t0, timer });
+    sendTo(p, "ping", { id }).catch(() => {});
+  }
+  // 오래 응답 없는 RTC 피어 정리
+  for (const p of S.peers.values()) if (p.via === "rtc" && Date.now() - p.lastSeen > 30000) removePeer(p.key, "응답 없음");
+}
+
+// ---------- room 전송 ----------
+async function initRoom() {
+  const room = await use("room");
+  if (!room) { S.roomOk = false; S.roomState = "사용 불가"; schedule(); return; }
+  S.room = room; S.roomState = "연결 중";
+  room.onConnection(c => { S.roomOk = c; S.roomState = c ? "연결됨" : "재연결 중"; schedule(); }, e => { S.roomState = "사용 불가 (" + e.code + ")"; S.roomOk = false; schedule(); });
+  room.onPeers(ch => {
+    for (const pr of ch.peers) {
+      if (pr.sameTab) { S.myPeer = pr.peer; continue; }
+      const info = pr.presence?.node;
+      if (info && typeof info === "object" && info.nodeId) upsertPeer("r:" + pr.peer, "room", sanitizeInfo(info), { peer: pr.peer, guest: pr.guest });
+    }
+    for (const pr of ch.left) removePeer("r:" + pr.peer);
+  });
+  for (const topic of ["ping", "pong", "task", "result"]) {
+    room.on(topic, msg => {
+      if (msg.sameTab || !msg.data || msg.data.to !== S.myPeer) return;
+      onMessage("r:" + msg.peer, topic, msg.data, (t, d) => room.emit(t, { ...d, to: msg.peer }).catch(() => {}));
+    }, e => log("e", `room ${topic}: ${e.code}`));
+  }
+  broadcastInfo();
+}
+function sanitizeInfo(i) {
+  const num = (v, d = 0) => (typeof v === "number" && isFinite(v)) ? v : d;
+  return { nodeId: String(i.nodeId).slice(0, 40), name: String(i.name || "이름 없음").slice(0, 40), preset: PRESETS[i.preset] ? i.preset : "cpu",
+    vram: num(i.vram), ram: num(i.ram), cores: num(i.cores, null), webgpu: !!i.webgpu, gpu: String(i.gpu || "").slice(0, 80),
+    maxBuffer: num(i.maxBuffer, null), measuredBw: num(i.measuredBw, null) || null, accept: !!i.accept, load: num(i.load), done: num(i.done),
+    webllm: MODELS[i.webllm] ? i.webllm : null, ua: String(i.ua || "").slice(0, 60) };
+}
+
+// ---------- WebRTC 전송 (로컬 실행 시) ----------
+S.rtcAvailable = (() => { try { if (typeof RTCPeerConnection !== "function") return false; const pc = new RTCPeerConnection(); pc.close(); return true; } catch { return false; } })();
+const rtcPending = {}; // 시작 측 대기 연결
+const enc64 = o => btoa(unescape(encodeURIComponent(JSON.stringify(o))));
+const dec64 = s => JSON.parse(decodeURIComponent(escape(atob(s.trim()))));
+function newPC() {
+  const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  pc.onconnectionstatechange = () => { log("d", `WebRTC 상태: ${pc.connectionState}`); renderRtcConns(); };
+  return pc;
+}
+function iceDone(pc) { return new Promise(r => { if (pc.iceGatheringState === "complete") return r(); const t = setTimeout(r, 4000); pc.addEventListener("icegatheringstatechange", () => { if (pc.iceGatheringState === "complete") { clearTimeout(t); r(); } }); }); }
+function wireChannel(pc, dc) {
+  const ctx = { pc, dc, key: null };
+  dc.onopen = () => { dc.send(JSON.stringify({ t: "hello", info: myInfo() })); };
+  dc.onmessage = ev => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.t === "hello" || msg.t === "info") {
+      const info = sanitizeInfo(msg.info || {}); ctx.key = "w:" + info.nodeId;
+      upsertPeer(ctx.key, "rtc", info, { dc, pc });
+      return;
+    }
+    if (!ctx.key) return;
+    onMessage(ctx.key, msg.t, msg, (t, d) => dc.send(JSON.stringify({ t, ...d })));
+  };
+  dc.onclose = () => { if (ctx.key) removePeer(ctx.key, "연결 종료"); };
+  S.rtcConns = S.rtcConns || []; S.rtcConns.push(ctx);
+}
+function rtcSend(p, obj) { try { if (p.dc?.readyState === "open") p.dc.send(JSON.stringify(obj)); } catch {} }
+async function rtcMakeOffer() {
+  const pc = newPC(); const dc = pc.createDataChannel("swarm"); wireChannel(pc, dc);
+  await pc.setLocalDescription(await pc.createOffer()); await iceDone(pc);
+  const id = uid("o"); rtcPending.current = pc;
+  $("#rtc-offer-out").value = enc64({ k: "offer", id, sdp: pc.localDescription.sdp, from: S.me.name });
+  log("i", "오퍼를 만들었습니다. 상대에게 전달하세요.");
+}
+async function rtcMakeAnswer() {
+  let o; try { o = dec64($("#rtc-offer-in").value); } catch { toast("오퍼 코드를 읽을 수 없습니다. 전체를 복사했는지 확인하세요."); return; }
+  if (o.k !== "offer") { toast("오퍼 코드가 아닙니다"); return; }
+  const pc = newPC(); pc.ondatachannel = ev => wireChannel(pc, ev.channel);
+  await pc.setRemoteDescription({ type: "offer", sdp: o.sdp });
+  await pc.setLocalDescription(await pc.createAnswer()); await iceDone(pc);
+  $("#rtc-answer-out").value = enc64({ k: "answer", id: o.id, sdp: pc.localDescription.sdp });
+  log("i", `${String(o.from || "상대").slice(0, 40)}의 오퍼에 응답을 만들었습니다. 응답 코드를 돌려주세요.`);
+}
+async function rtcApplyAnswer() {
+  let a; try { a = dec64($("#rtc-answer-in").value); } catch { toast("응답 코드를 읽을 수 없습니다"); return; }
+  const pc = rtcPending.current; if (!pc) { toast("먼저 오퍼를 만드세요"); return; }
+  try { await pc.setRemoteDescription({ type: "answer", sdp: a.sdp }); log("i", "응답 적용, 연결을 기다립니다"); rtcPending.current = null; }
+  catch (e) { toast("응답 적용 실패: " + e.message); }
+}
+function renderRtcConns() {
+  const el = $("#rtc-conns"); if (!el) return;
+  const list = (S.rtcConns || []).map(c => `<span class="chip"><span class="dot ${c.pc.connectionState === "connected" ? "ok" : c.pc.connectionState === "failed" ? "bad" : "warn"}"></span>${esc(c.key ? S.peers.get(c.key)?.info.name || c.key : "협상 중")} · ${esc(c.pc.connectionState)}</span>`);
+  el.innerHTML = list.length ? `<div class="row">${list.join("")}</div>` : "";
+}
+
+// ---------- 분배와 실행 ----------
+function candidates() {
+  const list = [{ key: "self", info: myInfo(), rtt: 0, self: true }];
+  for (const p of S.peers.values()) if (p.info.accept) list.push({ key: p.key, info: p.info, rtt: peerRtt(p) ?? 999, p });
+  return list;
+}
+function plan(req, exclude, preview = false) {
+  const m = MODELS[req.model];
+  const all = candidates().filter(c => !exclude.has(c.key));
+  if (req.strategy === "pipeline") {
+    const pool = all.map(c => ({ ...c, budget: estimate(c.info, m, 1).memBudget - 0.5 })).filter(c => c.budget > 0.3).sort((a, b) => b.budget - a.budget);
+    const total = weightGB(m); let acc = 0; const pick = [];
+    for (const c of pool) { pick.push(c); acc += c.budget; if (acc >= total * 1.05) break; }
+    if (acc < total * 1.05 || !pick.length) return null;
+    const sum = pick.reduce((s, c) => s + c.budget, 0);
+    let layersLeft = m.layers;
+    const stages = pick.map((c, i) => { const L = i === pick.length - 1 ? layersLeft : Math.max(1, Math.round(m.layers * c.budget / sum)); layersLeft -= L; return { ...c, layers: L, frac: L / m.layers }; }).filter(s => s.layers > 0);
+    return { kind: "pipeline", stages };
+  }
+  const fit = all.filter(c => estimate(c.info, m).fits);
+  if (req.strategy === "local") return fit.find(c => c.self) ? { kind: "single", node: fit.find(c => c.self) } : null;
+  if (!fit.length) return null;
+  let node;
+  if (req.strategy === "rr") node = fit[(preview ? S.rrIdx : S.rrIdx++) % fit.length];
+  else if (req.strategy === "least") node = [...fit].sort((a, b) => a.info.load - b.info.load || a.rtt - b.rtt)[0];
+  else if (req.strategy === "latency") node = [...fit].sort((a, b) => a.rtt - b.rtt)[0];
+  else node = [...fit].sort((a, b) => (estimate(b.info, m).tps / (1 + b.info.load)) - (estimate(a.info, m).tps / (1 + a.info.load)))[0];
+  return { kind: "single", node };
+}
+function execOn(c, task, timeoutMs) {
+  if (c.self) return executeTask(task);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { S.pendingTasks.delete(task.taskId); reject(new Error("시간 초과")); }, timeoutMs);
+    S.pendingTasks.set(task.taskId, { resolve, reject, timer, peerKey: c.key });
+    sendTo(c.p, "task", task).catch(e => { clearTimeout(timer); S.pendingTasks.delete(task.taskId); reject(e); });
+  });
+}
+async function runRequest(r) {
+  const exclude = new Set(); const t0 = performance.now();
+  for (let attempt = 0; attempt <= r.retries; attempt++) {
+    r.attempts = attempt;
+    const pl = plan(r, exclude);
+    if (!pl) { r.status = "failed"; r.error = "적재 가능한 노드가 없습니다"; log("e", `#${r.n} ${r.error} (${MODELS[r.model].label}, ${STRATEGIES[r.strategy]})`); break; }
+    const base = { model: r.model, promptTokens: r.promptTokens, maxTokens: r.maxTokens, speed: r.speed, real: r.real, prompt: r.prompt.slice(0, 1500) };
+    try {
+      if (pl.kind === "single") {
+        r.nodes = [pl.node.info.name];
+        log("d", `#${r.n} → ${pl.node.info.name} (시도 ${attempt + 1})`); schedule();
+        const res = await execOn(pl.node, { ...base, taskId: uid("t") }, r.timeoutMs);
+        if (!res.ok) throw Object.assign(new Error(res.error), { node: pl.node.key });
+        const net = pl.node.rtt || 0;
+        Object.assign(r, { ttftMs: res.ttftMs + net, decodeMs: res.decodeMs, tokens: res.tokens, tps: res.tps, executor: res.executor, netMs: net, text: res.text });
+      } else {
+        r.nodes = pl.stages.map(s => `${s.info.name}[${s.layers}L]`);
+        log("d", `#${r.n} 파이프라인 → ${r.nodes.join(" → ")}`); schedule();
+        const outs = await Promise.all(pl.stages.map(s => execOn(s, { ...base, taskId: uid("t"), stage: true, frac: s.frac }, r.timeoutMs).then(res => { if (!res.ok) throw Object.assign(new Error(`${s.info.name}: ${res.error}`), { node: s.key }); return res; })));
+        // 별형(코디네이터 경유) 토폴로지: 토큰마다 각 단계로 활성값 왕복 → 단계별 RTT 합
+        const netPerTok = pl.stages.reduce((s, st) => s + (st.rtt || 0), 0);
+        const perTok = outs.reduce((s, o) => s + o.perTokMs, 0) + netPerTok;
+        Object.assign(r, { ttftMs: outs.reduce((s, o) => s + o.prefillMs, 0) + netPerTok, decodeMs: perTok * r.maxTokens, tokens: r.maxTokens, tps: 1000 / perTok, executor: "sim-pipe", netMs: netPerTok });
+      }
+      r.status = "done"; r.e2eMs = r.ttftMs + r.decodeMs; r.wallMs = performance.now() - t0;
+      log("i", `#${r.n} 완료 · ${fmt(r.tps, 1)} tok/s · TTFT ${fmt(r.ttftMs)}ms`);
+      return;
+    } catch (e) {
+      if (e.node) exclude.add(e.node); else if (pl.kind === "single") exclude.add(pl.node.key);
+      log("w", `#${r.n} 실패: ${e.message}${attempt < r.retries ? " → 재시도" : ""}`);
+      r.error = e.message;
+    }
+  }
+  if (r.status !== "done") r.status = "failed";
+}
+function pump() {
+  if (S.paused) return;
+  const conc = Math.max(1, +$("#q-conc").value || 1);
+  while (true) {
+    const next = S.queue.find(q => q.status === "queued");
+    const limit = next?.runId ? activeRuns.get(next.runId)?.config.concurrency || conc : conc;
+    if (!next || S.running >= limit) break;
+    next.status = "running"; S.running++;
+    runRequest(next).finally(() => { S.running--; onRequestDone(next); schedule(); pump(); });
+  }
+  schedule();
+}
+function enqueue(cfg, runId = null) {
+  for (let i = 0; i < cfg.count; i++) {
+    S.queue.push({ id: uid("q"), n: ++S.seq, status: "queued", model: cfg.model, strategy: cfg.strategy, prompt: cfg.prompt, promptTokens: +cfg.promptTokens, maxTokens: +cfg.maxTokens,
+      speed: +cfg.speed || 1, real: !!cfg.real, retries: cfg.retries ?? 1, timeoutMs: (cfg.timeoutSec || 60) * 1000, runId, nodes: [] });
+  }
+  pump();
+}
+function resultRow(r) {
+  return { n: r.n, ok: r.status === "done", model: r.model, strategy: r.strategy, nodes: r.nodes, ttftMs: r.ttftMs ?? null, tps: r.tps ?? null, e2eMs: r.e2eMs ?? null,
+    wallMs: r.wallMs ?? null, tokens: r.tokens ?? 0, netMs: r.netMs ?? null, attempts: r.attempts || 0, executor: r.executor || null, error: r.status === "done" ? null : (r.error || null) };
+}
+function summarize(results, wallMs) {
+  const ok = results.filter(r => r.ok);
+  const toks = ok.reduce((s, r) => s + (r.tokens || 0), 0);
+  const simSpan = wallMs; // 배속 보정 전 실제 경과
+  return { n: results.length, ok: ok.length, successRate: results.length ? ok.length / results.length : 0,
+    avgTtft: avg(ok.map(r => r.ttftMs)), avgTps: avg(ok.map(r => r.tps)), p50E2e: pct(ok.map(r => r.e2eMs), 0.5), p95E2e: pct(ok.map(r => r.e2eMs), 0.95),
+    throughput: simSpan ? toks / (simSpan / 1000) : null };
+}
+function onRequestDone(r) {
+  if (!r.runId) return;
+  const run = activeRuns.get(r.runId); if (!run) return;
+  const mine = S.queue.filter(q => q.runId === r.runId);
+  if (mine.some(q => q.status === "queued" || q.status === "running")) return;
+  activeRuns.delete(r.runId);
+  const results = mine.map(resultRow).slice(0, 200);
+  const wall = (performance.now() - run.t0) * (run.config.speed || 1);
+  run.doc.results = results; run.doc.summary = summarize(results, wall); run.doc.status = "done"; run.doc.finishedAt = Date.now();
+  run.doc.log = run.log.map(l => ({ t: l.t, level: l.level, msg: String(l.msg).slice(0, 300) }));
+  Store.put("runs", run.doc.id, run.doc).then(() => toast(`실행 완료: ${run.doc.name}`)).catch(() => {});
+}
+function swarmSnapshot() {
+  return candidates().map(c => ({ name: c.info.name, preset: c.info.preset, vram: c.info.vram, webgpu: c.info.webgpu, via: c.self ? "self" : c.p.via, rtt: c.self ? 0 : (peerRtt(c.p) ?? null), measuredBw: c.info.measuredBw || null }));
+}
+function startRun(exp) {
+  const id = uid("run");
+  const config = { ...exp.config };
+  const doc = { id, createdAt: Date.now(), expId: exp.id, name: exp.name, config, nodes: swarmSnapshot(), status: "running", storeMode: S.storeMode, results: [], log: [] };
+  activeRuns.set(id, { doc, config, t0: performance.now(), log: [] });
+  log("i", `실험 실행: ${exp.name} (${config.count}건, ${MODELS[config.model].label}, ${STRATEGIES[config.strategy]})`);
+  enqueue(config, id);
+  location.hash = "#queue";
+}
+
+// ---------- 렌더 ----------
+let rafPending = false;
+function schedule() { if (!rafPending) { rafPending = true; requestAnimationFrame(() => { rafPending = false; render(); }); } }
+function currentView() { const v = location.hash.slice(1); return document.getElementById("v-" + v) ? v : "overview"; }
+
+function render() {
+  const view = currentView();
+  for (const a of $$("#tabs a")) a.setAttribute("aria-current", a.dataset.v === view ? "page" : "false");
+  for (const s of $$("section.view")) s.hidden = s.id !== "v-" + view;
+  renderChips();
+  $("#n-nodes").textContent = 1 + S.peers.size;
+  $("#n-queue").textContent = S.queue.filter(q => q.status === "queued" || q.status === "running").length || "";
+  $("#n-experiments").textContent = S.experiments.length || "";
+  $("#n-runs").textContent = S.runs.length || "";
+  const ph = phases(); $("#n-poc").textContent = `${ph.filter(p => p.status === "done").length}/${ph.length}`;
+  ({ overview: renderOverview, nodes: renderNodes, connect: renderConnect, queue: renderQueue, experiments: renderExperiments, runs: renderRuns, models: renderModels, poc: renderPoc, notes: renderNotes })[view]();
+}
+function renderChips() {
+  const room = S.room ? (S.roomOk ? "ok" : "warn") : "bad";
+  $("#chips").innerHTML = [
+    `<span class="chip"><span class="dot ${room}"></span>room ${esc(S.roomState || "확인 중")}</span>`,
+    `<span class="chip"><span class="dot ${S.rtcAvailable ? "ok" : "bad"}"></span>WebRTC ${S.rtcAvailable ? "사용 가능" : "차단됨"}</span>`,
+    `<span class="chip"><span class="dot ${S.me.webgpu ? "ok" : "warn"}"></span>WebGPU ${S.me.webgpu ? "켜짐" : "없음"}</span>`,
+    `<span class="chip"><span class="dot ${Store.db ? "ok" : "warn"}"></span>저장: ${esc(S.storeMode)}</span>`
+  ].join("");
+}
+function sparkline(samples) {
+  const s = samples.slice(-30); if (!s.length) return `<div class="small muted">측정 대기</div>`;
+  const ok = s.filter(v => v != null); const max = Math.max(50, ...ok) * 1.15;
+  const W = 240, H = 34, step = W / Math.max(1, 29);
+  let d = "", area = "", started = false, lastX = 0, lastY = 0, firstX = 0;
+  s.forEach((v, i) => { if (v == null) return; const x = i * step, y = H - 2 - (v / max) * (H - 6); if (!started) { d += `M${x},${y}`; firstX = x; started = true; } else d += `L${x},${y}`; lastX = x; lastY = y; });
+  if (started) area = `${d}L${lastX},${H}L${firstX},${H}Z`;
+  const drops = s.map((v, i) => v == null ? `<rect x="${i * step - 1.5}" y="${H - 6}" width="3" height="6" fill="var(--bad)"></rect>` : "").join("");
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="RTT 추이">
+    <line x1="0" y1="${H - 1}" x2="${W}" y2="${H - 1}" stroke="var(--line)" stroke-width="1"></line>
+    ${area ? `<path d="${area}" fill="var(--accent)" fill-opacity=".12"></path><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"></path><circle cx="${lastX}" cy="${lastY}" r="2.5" fill="var(--accent)"></circle>` : ""}${drops}</svg>`;
+}
+function nodeCard(info, opts) {
+  const p = PRESETS[info.preset] || PRESETS.cpu;
+  const budget = estimate(info, MODELS["qwen2.5-0.5b"]).memBudget;
+  const fitList = Object.entries(MODELS).filter(([, m]) => estimate(info, m).fits).map(([, m]) => m.label.split(" q4")[0]);
+  const st = opts.stab;
+  const stPill = !opts.self ? (st == null ? `<span class="pill mute">측정 대기</span>` : st.score > 0.85 ? `<span class="pill ok">안정</span>` : st.score > 0.6 ? `<span class="pill warn">불안정</span>` : `<span class="pill bad">나쁨</span>`) : `<span class="pill acc">이 탭</span>`;
+  const status = info.load > 0 ? `<span class="pill acc">작업 중 ${info.load}</span>` : info.accept ? `<span class="pill ok">대기</span>` : `<span class="pill mute">수락 꺼짐</span>`;
+  return `<article class="node ${opts.self ? "me" : ""}">
+    <div class="node-h"><div style="min-width:0"><b>${esc(info.name)}</b><div class="small muted">${esc(p.label)}</div></div><div class="row" style="gap:4px;justify-content:end">${stPill}${status}</div></div>
+    <dl class="kv">
+      <dt>연결</dt><dd>${opts.self ? "로컬" : opts.via === "room" ? "room 중계" : "WebRTC 직접"}</dd>
+      <dt>GPU</dt><dd>${info.webgpu ? esc(info.gpu || "WebGPU") : "없음 (CPU)"}</dd>
+      <dt>VRAM / 가용 추정</dt><dd>${fmt(info.vram, 1)} / ${fmt(budget, 1)} GB</dd>
+      <dt>RAM · 코어</dt><dd>${fmt(info.ram)} GB · ${info.cores ?? "–"}</dd>
+      <dt>maxBuffer</dt><dd>${info.maxBuffer ? (info.maxBuffer / 2 ** 30).toFixed(2) + " GiB" : "–"}</dd>
+      <dt>측정 대역폭</dt><dd>${info.measuredBw ? fmt(info.measuredBw) + " GB/s" : "미측정"}</dd>
+      ${opts.self ? "" : `<dt>RTT 중앙값</dt><dd>${opts.rtt == null ? "–" : fmt(opts.rtt, 1) + " ms"}</dd><dt>핑 성공 · 지터</dt><dd>${st ? fmt(st.succ * 100) + "% · " + fmt(st.jitter, 1) + " ms" : "–"}</dd>`}
+      <dt>처리 완료</dt><dd>${fmt(info.done)}건${info.webllm ? " · WebLLM " + esc(MODELS[info.webllm].label) : ""}</dd>
+    </dl>
+    ${opts.self ? "" : sparkline(opts.samples)}
+    <div class="small"><span class="muted">단독 적재 가능:</span> ${fitList.length ? esc(fitList.join(", ")) : "없음"}</div>
+  </article>`;
+}
+function renderNodes() {
+  const cards = [nodeCard(myInfo(), { self: true })];
+  for (const p of S.peers.values()) cards.push(nodeCard(p.info, { via: p.via, rtt: peerRtt(p), stab: peerStability(p), samples: p.samples }));
+  $("#node-grid").innerHTML = cards.join("") + (S.peers.size ? "" : `<div class="panel"><h3>아직 혼자입니다</h3><p class="small muted" style="margin:0">다른 기기나 브라우저 탭에서 이 페이지를 열면 여기에 노드가 나타납니다. 로컬 파일로 열었다면 <a href="#connect">연결</a> 화면에서 WebRTC 코드를 주고받으세요.</p></div>`);
+}
+function swarmTotals() {
+  const c = candidates();
+  const vram = c.reduce((s, x) => s + (x.info.vram || 0), 0);
+  const usable = c.reduce((s, x) => s + estimate(x.info, MODELS["qwen2.5-0.5b"]).memBudget, 0);
+  const rtts = [...S.peers.values()].map(peerRtt).filter(v => v != null);
+  return { nodes: c.length, vram, usable, rtt: avg(rtts) };
+}
+function renderOverview() {
+  const t = swarmTotals();
+  const q = { queued: 0, running: 0, done: 0, failed: 0 }; S.queue.forEach(r => q[r.status]++);
+  $("#ov-tiles").innerHTML = [
+    ["노드", t.nodes, "개"], ["총 VRAM", fmt(t.vram, 1), "GB"], ["브라우저 가용 추정", fmt(t.usable, 1), "GB"],
+    ["평균 RTT", t.rtt == null ? "–" : fmt(t.rtt, 1), t.rtt == null ? "" : "ms"], ["큐 대기 · 실행", `${q.queued} · ${q.running}`, ""], ["완료 · 실패", `${q.done} · ${q.failed}`, ""]
+  ].map(([k, v, u]) => `<div class="tile"><span class="label">${k}</span><span class="v">${v} <small>${u}</small></span></div>`).join("");
+  const p = PRESETS.rtx4070l;
+  const m8 = estimate({ preset: "rtx4070l", vram: 8, ram: 16, webgpu: true }, MODELS["llama3.1-8b"]);
+  $("#ov-constraints").innerHTML = `
+    <dt>OS · 브라우저</dt><dd>Windows 11 · Chrome/Edge (WebGPU)</dd>
+    <dt>GPU</dt><dd>RTX 4070 Laptop · 8GB GDDR6 · ${p.bw} GB/s</dd>
+    <dt>브라우저 가용 VRAM</dt><dd>약 ${fmt(8 * p.usable, 1)} GB (WDDM·다른 앱 제외 추정)</dd>
+    <dt>Llama 3.1 8B q4</dt><dd>${m8.fits ? "단독 적재 가능 (빠듯)" : "단독 적재 불가"} · 필요 ${fmt(m8.need, 1)} GB</dd>
+    <dt>Qwen2.5 14B q4</dt><dd>2~3노드 레이어 분할 필요</dd>
+    <dt>전원</dt><dd>배터리 모드에서는 GPU 클럭이 떨어짐. 충전기 연결 권장</dd>
+    <dt>이 탭</dt><dd>${esc(S.me.gpuDesc || "감지 중")}</dd>`;
+  const ph = phases();
+  $("#ov-progress").innerHTML = ph.map(x => `<i class="${x.status}" title="${esc(x.title)}"></i>`).join("");
+  const cur = ph.find(x => x.status === "doing") || ph.find(x => x.status !== "done");
+  $("#ov-phase-list").innerHTML = cur ? `<b>진행 중:</b> ${esc(cur.title)} <span class="muted">(${cur.items.filter(i => i.done).length}/${cur.items.length} 항목)</span>` : "모든 단계를 마쳤습니다.";
+  $("#ov-runs").innerHTML = S.runs.length ? `<div class="table-wrap"><table><thead><tr><th>시작</th><th>실험</th><th class="num">tok/s</th><th class="num">성공</th></tr></thead><tbody>${S.runs.slice(0, 5).map(r => `<tr><td>${timeStr(r.createdAt)}</td><td>${esc(r.name)}</td><td class="num">${fmt(r.summary?.avgTps, 1)}</td><td class="num">${r.summary ? fmt(r.summary.successRate * 100) + "%" : "–"}</td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="small muted" style="margin:0">아직 실행 기록이 없습니다. <a href="#experiments">실험 설정</a>에서 기본 설정을 실행해 보세요.</p>`;
+  renderLog($("#ov-log"), S.log.slice(-80));
+}
+function renderLog(el, lines) {
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
+  el.innerHTML = lines.length ? lines.map(l => `<span class="${l.level}">${new Date(l.t).toLocaleTimeString("ko-KR", { hour12: false })} ${esc(l.msg)}</span>`).join("\n") : `<span class="d">로그가 없습니다</span>`;
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+function renderConnect() {
+  $("#room-pill").innerHTML = S.room ? (S.roomOk ? `<span class="pill ok">연결됨 · 피어 ${[...S.peers.values()].filter(p => p.via === "room").length}</span>` : `<span class="pill warn">${esc(S.roomState)}</span>`) : `<span class="pill bad">사용 불가</span>`;
+  $("#rtc-pill").innerHTML = S.rtcAvailable ? `<span class="pill ok">사용 가능</span>` : `<span class="pill bad">이 환경에서 차단됨</span>`;
+  for (const b of $$("#rtc-panel button")) b.disabled = !S.rtcAvailable;
+  renderRtcConns();
+}
+function statusPill(s) { return { queued: `<span class="pill mute">대기</span>`, running: `<span class="pill acc">실행 중</span>`, done: `<span class="pill ok">완료</span>`, failed: `<span class="pill bad">실패</span>` }[s]; }
+function renderQueue() {
+  const rows = S.queue.slice(-200).reverse();
+  $("#q-body").innerHTML = rows.length ? rows.map(r => `<tr title="${esc(r.error || "")}"><td class="num">${r.n}</td><td>${statusPill(r.status)}</td><td>${esc(MODELS[r.model].label)}</td><td>${esc(STRATEGIES[r.strategy])}</td>
+    <td class="wrap">${esc(r.nodes.join(" → ") || (r.error && r.status === "failed" ? r.error : "–"))}</td><td class="num">${fmt(r.ttftMs)}</td><td class="num">${fmt(r.tps, 1)}</td><td class="num">${fmt(r.e2eMs)}</td><td class="num">${r.attempts || 0}</td><td>${esc(r.executor || "")}</td></tr>`).join("")
+    : `<tr><td colspan="10" class="muted">큐가 비어 있습니다. 위에서 요청을 추가하면 노드에 분배됩니다.</td></tr>`;
+  $("#q-pause").textContent = S.paused ? "다시 시작" : "일시 정지";
+  const pl = plan({ model: $("#q-model").value, strategy: $("#q-strategy").value }, new Set(), true);
+  $("#q-plan").textContent = !pl ? "현재 노드 구성으로는 이 모델을 실행할 수 없습니다" : pl.kind === "single" ? `다음 배정 예상: ${pl.node.info.name}` : `분할 예상: ${pl.stages.map(s => `${s.info.name} ${s.layers}L`).join(" → ")}`;
+}
+const DEFAULT_EXP = { name: "", config: { model: "llama3.2-1b", strategy: "weighted", count: 8, concurrency: 2, promptTokens: 64, maxTokens: 128, speed: 5, timeoutSec: 60, retries: 1, prompt: "WebGPU로 브라우저에서 LLM을 돌릴 때의 병목을 설명해줘.", notes: "", real: false } };
+function fillExpForm(exp) {
+  S.editingExp = exp?.id || null;
+  const e = exp || DEFAULT_EXP, c = { ...DEFAULT_EXP.config, ...e.config };
+  $("#exp-form-title").textContent = exp ? "설정 편집" : "새 실험";
+  $("#e-name").value = e.name || `${MODELS[c.model].label} · ${STRATEGIES[c.strategy]}`;
+  $("#e-model").value = c.model; $("#e-strategy").value = c.strategy; $("#e-n").value = c.count; $("#e-conc").value = c.concurrency;
+  $("#e-ptok").value = c.promptTokens; $("#e-max").value = c.maxTokens; $("#e-speed").value = String(c.speed); $("#e-timeout").value = c.timeoutSec;
+  $("#e-retries").value = c.retries; $("#e-prompt").value = c.prompt; $("#e-notes").value = c.notes || ""; $("#e-real").checked = !!c.real;
+  $("#e-msg").textContent = "";
+}
+function readExpForm() {
+  const n = (id, d, lo, hi) => Math.min(hi, Math.max(lo, Math.round(+$(id).value || d)));
+  return { name: $("#e-name").value.trim() || "이름 없는 실험",
+    config: { model: $("#e-model").value, strategy: $("#e-strategy").value, count: n("#e-n", 8, 1, 200), concurrency: n("#e-conc", 2, 1, 16), promptTokens: n("#e-ptok", 64, 1, 8192), maxTokens: n("#e-max", 128, 1, 2048),
+      speed: +$("#e-speed").value, timeoutSec: n("#e-timeout", 60, 5, 600), retries: n("#e-retries", 1, 0, 5), prompt: $("#e-prompt").value.slice(0, 1500), notes: $("#e-notes").value.slice(0, 2000), real: $("#e-real").checked } };
+}
+async function saveExp() {
+  const f = readExpForm(); const id = S.editingExp || uid("exp");
+  const prev = S.experiments.find(x => x.id === id);
+  const doc = { ...f, id, createdAt: prev?.createdAt || Date.now(), updatedAt: Date.now() };
+  await Store.put("experiments", id, doc); S.editingExp = id;
+  $("#exp-form-title").textContent = "설정 편집"; $("#e-msg").textContent = "저장했습니다";
+  return doc;
+}
+function renderExperiments() {
+  const el = $("#exp-list");
+  el.innerHTML = S.experiments.length ? S.experiments.map(x => {
+    const c = x.config || {}; const runs = S.runs.filter(r => r.expId === x.id);
+    const last = runs[0]?.summary;
+    return `<div class="card ${S.editingExp === x.id ? "sel" : ""}"><div><b>${esc(x.name)}</b><div class="small muted">${esc(MODELS[c.model]?.label || c.model)} · ${esc(STRATEGIES[c.strategy] || c.strategy)} · ${c.count}건 · 동시 ${c.concurrency}</div></div>
+      ${c.notes ? `<div class="small">${esc(c.notes).slice(0, 140)}</div>` : ""}
+      <div class="small muted">실행 ${runs.length}회${last ? ` · 최근 ${fmt(last.avgTps, 1)} tok/s, 성공 ${fmt(last.successRate * 100)}%` : ""}</div>
+      <div class="row"><button class="primary" data-run="${esc(x.id)}">실행</button><button data-edit="${esc(x.id)}">편집</button><button data-dup="${esc(x.id)}">복제</button><button class="danger" data-del="${esc(x.id)}">삭제</button></div></div>`;
+  }).join("") : `<p class="small muted" style="margin:0">저장된 설정이 없습니다. 왼쪽 양식은 기본값으로 채워져 있으니 그대로 저장해도 됩니다.</p>`;
+}
+function renderRuns() {
+  const body = $("#runs-body");
+  if (!S.runs.length) { body.innerHTML = `<tr><td colspan="12" class="muted">실행 기록이 없습니다. 실험을 실행하거나 작업 큐에서 "현재 큐를 실행 기록으로 저장"을 누르세요.</td></tr>`; $("#cmp").innerHTML = ""; return; }
+  body.innerHTML = S.runs.map(r => {
+    const s = r.summary || {}; const c = r.config || {};
+    const sel = S.selectedRuns.includes(r.id);
+    const open = S.openRun === r.id;
+    return `<tr><td><input type="checkbox" data-sel="${esc(r.id)}" ${sel ? "checked" : ""} aria-label="비교 선택" style="width:auto;min-height:0"></td><td>${timeStr(r.createdAt)}</td><td>${esc(r.name)}</td><td>${esc(MODELS[c.model]?.label || c.model || "혼합")}</td><td>${esc(STRATEGIES[c.strategy] || c.strategy || "혼합")}</td>
+      <td class="num">${(r.nodes || []).length}</td><td class="num">${s.n ? `${s.ok}/${s.n}` : "–"}</td><td class="num">${fmt(s.avgTtft)}</td><td class="num">${fmt(s.avgTps, 1)}</td><td class="num">${fmt(s.p95E2e)}</td><td class="num">${fmt(s.throughput, 1)}</td>
+      <td><button data-open="${esc(r.id)}">${open ? "접기" : "로그"}</button> <button class="danger" data-delrun="${esc(r.id)}">삭제</button></td></tr>
+      ${open ? `<tr><td colspan="12" style="white-space:normal"><div style="display:grid;gap:8px">
+        <div class="small"><b>노드 구성:</b> ${esc((r.nodes || []).map(n => `${n.name}(${PRESETS[n.preset]?.label.split(" (")[0] || n.preset}, ${n.via}${n.rtt != null ? `, ${Math.round(n.rtt)}ms` : ""})`).join(", "))}</div>
+        ${c.notes ? `<div class="small"><b>메모:</b> ${esc(c.notes)}</div>` : ""}
+        <div class="log">${(r.log || []).map(l => `<span class="${esc(l.level)}">${new Date(l.t).toLocaleTimeString("ko-KR", { hour12: false })} ${esc(l.msg)}</span>`).join("\n") || "로그 없음"}</div></div></td></tr>` : ""}`;
+  }).join("");
+  const sel = S.selectedRuns.map(id => S.runs.find(r => r.id === id)).filter(Boolean);
+  if (sel.length < 2) { $("#cmp").innerHTML = `<p class="small muted" style="margin:0">표에서 실행 두 개를 선택하세요. (선택 ${sel.length}/2)</p>`; return; }
+  const [a, b] = sel;
+  const rows = [["모델", r => MODELS[r.config?.model]?.label || "혼합", null], ["전략", r => STRATEGIES[r.config?.strategy] || "혼합", null], ["노드 수", r => (r.nodes || []).length, 1],
+    ["성공률 %", r => (r.summary?.successRate ?? 0) * 100, 1], ["평균 TTFT ms", r => r.summary?.avgTtft, -1], ["평균 tok/s", r => r.summary?.avgTps, 1], ["p50 E2E ms", r => r.summary?.p50E2e, -1], ["p95 E2E ms", r => r.summary?.p95E2e, -1], ["처리량 tok/s", r => r.summary?.throughput, 1]];
+  $("#cmp").innerHTML = `<div class="table-wrap"><table><thead><tr><th>지표</th><th>A · ${esc(a.name)}<div class="small muted">${timeStr(a.createdAt)}</div></th><th>B · ${esc(b.name)}<div class="small muted">${timeStr(b.createdAt)}</div></th><th class="num">B − A</th></tr></thead><tbody>${rows.map(([k, f, dir]) => {
+    const va = f(a), vb = f(b);
+    if (dir == null) return `<tr><td>${k}</td><td>${esc(va)}</td><td>${esc(vb)}</td><td></td></tr>`;
+    const d = (vb ?? NaN) - (va ?? NaN); const better = isFinite(d) && d !== 0 ? (d * dir > 0 ? "ok" : "bad") : "mute";
+    return `<tr><td>${k}</td><td class="num">${fmt(va, 1)}</td><td class="num">${fmt(vb, 1)}</td><td class="num"><span class="pill ${better}">${isFinite(d) ? (d > 0 ? "+" : "") + fmt(d, 1) : "–"}</span></td></tr>`;
+  }).join("")}</tbody></table></div>`;
+}
+function allResults() { return S.runs.flatMap(r => (r.results || []).map(x => ({ ...x, model: x.model || r.config?.model, strategy: x.strategy || r.config?.strategy }))); }
+function renderModels() {
+  const res = allResults(); const c = candidates();
+  const rows = Object.entries(MODELS).map(([k, m]) => {
+    const meEst = estimate(myInfo(), m);
+    const singles = c.map(x => estimate(x.info, m)).filter(e => e.fits);
+    const best = singles.length ? Math.max(...singles.map(e => e.tps)) : null;
+    const pl = plan({ model: k, strategy: "pipeline" }, new Set());
+    let pipeTps = null;
+    if (pl) { const per = pl.stages.reduce((s, st) => s + estimate(st.info, m, st.frac).perTokMs + (st.rtt || 0), 0); pipeTps = 1000 / per; }
+    const mine = res.filter(r => r.model === k); const ok = mine.filter(r => r.ok);
+    return { k, m, meEst, best, pipeTps, pl, n: mine.length, tps: avg(ok.map(r => r.tps)), ttft: avg(ok.map(r => r.ttftMs)), sr: mine.length ? ok.length / mine.length : null };
+  });
+  $("#models-body").innerHTML = rows.map(r => `<tr><td>${esc(r.m.label)}</td><td class="num">${fmt(weightGB(r.m), 2)}</td>
+    <td>${r.meEst.fits ? `<span class="pill ok">가능</span>` : `<span class="pill bad">부족</span>`} <span class="small muted">${fmt(r.meEst.need, 1)}/${fmt(r.meEst.memBudget, 1)}GB</span></td>
+    <td>${r.best != null ? `<span class="pill ok">단독</span>` : r.pl ? `<span class="pill warn">분할 ${r.pl.stages.length}노드</span>` : `<span class="pill bad">불가</span>`}</td>
+    <td class="num">${fmt(r.best, 1)}</td><td class="num">${fmt(r.pipeTps, 1)}</td><td class="num">${r.n}</td><td class="num">${fmt(r.tps, 1)}</td><td class="num">${fmt(r.ttft)}</td><td class="num">${r.sr == null ? "–" : fmt(r.sr * 100) + "%"}</td></tr>`).join("");
+  // 모델×전략
+  const groups = {};
+  for (const r of res) { const g = groups[r.model + "|" + r.strategy] ||= []; g.push(r); }
+  const gk = Object.keys(groups).sort();
+  $("#ms-body").innerHTML = gk.length ? gk.map(key => { const [mk, sk] = key.split("|"); const g = groups[key], ok = g.filter(x => x.ok);
+    return `<tr><td>${esc(MODELS[mk]?.label || mk)} · ${esc(STRATEGIES[sk] || sk)}</td><td class="num">${g.length}</td><td class="num">${fmt(avg(ok.map(x => x.tps)), 1)}</td><td class="num">${fmt(avg(ok.map(x => x.ttftMs)))}</td><td class="num">${fmt(pct(ok.map(x => x.e2eMs), 0.95))}</td><td class="num">${fmt(ok.length / g.length * 100)}%</td></tr>`; }).join("")
+    : `<tr><td colspan="6" class="muted">측정값이 없습니다. 실험을 실행하면 모델과 전략 조합별로 집계됩니다.</td></tr>`;
+  $("#model-chart").innerHTML = barChart(rows.map(r => ({ label: r.m.label.replace(" q4", "").replace(" (분할 전용)", ""), a: r.tps, b: r.best ?? r.pipeTps })));
+}
+function barChart(rows) {
+  const W = 640, rowH = 34, padL = 150, padR = 56, top = 8, H = top + rows.length * rowH + 22;
+  const max = Math.max(10, ...rows.flatMap(r => [r.a || 0, r.b || 0]));
+  const nice = (() => { const p = Math.pow(10, Math.floor(Math.log10(max))); return Math.ceil(max / p) * p; })();
+  const x = v => padL + (v / nice) * (W - padL - padR);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * nice);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="모델별 디코딩 속도">`;
+  for (const t of ticks) s += `<line x1="${x(t)}" y1="${top}" x2="${x(t)}" y2="${H - 20}" stroke="var(--line)"></line><text x="${x(t)}" y="${H - 6}" font-size="11" text-anchor="middle" fill="var(--muted)" font-family="var(--font-mono)">${fmt(t)}</text>`;
+  rows.forEach((r, i) => {
+    const y = top + i * rowH;
+    s += `<text x="${padL - 8}" y="${y + rowH / 2 + 4}" font-size="12" text-anchor="end" fill="var(--fg)">${esc(r.label)}</text>`;
+    if (r.a != null) s += `<rect x="${padL}" y="${y + 5}" width="${Math.max(1, x(r.a) - padL)}" height="11" rx="2" fill="var(--accent)"></rect><text x="${x(r.a) + 5}" y="${y + 14}" font-size="11" fill="var(--fg)" font-family="var(--font-mono)">${fmt(r.a, 1)}</text>`;
+    else s += `<text x="${padL + 4}" y="${y + 14}" font-size="11" fill="var(--muted)">측정 없음</text>`;
+    if (r.b != null) s += `<rect x="${padL}" y="${y + 18}" width="${Math.max(1, x(r.b) - padL)}" height="11" rx="2" fill="var(--series2)"></rect><text x="${x(r.b) + 5}" y="${y + 27}" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">${fmt(r.b, 1)}</text>`;
+    else s += `<text x="${padL + 4}" y="${y + 28}" font-size="11" fill="var(--muted)">실행 불가</text>`;
+  });
+  return s + `</svg>`;
+}
+
+// ---------- PoC 단계 ----------
+const DEFAULT_PHASES = [
+  { id: "p0", title: "0. 단일 노드 환경 기준선", status: "doing", note: "", items: ["Chrome/Edge에서 WebGPU 어댑터가 RTX 4070으로 잡히는지 확인", "Windows 그래픽 설정에서 브라우저를 '고성능 GPU'로 지정", "maxBufferSize와 shader-f16 지원 기록", "GPU 복사 대역폭 측정값 기록 (충전기 연결 상태)"] },
+  { id: "p1", title: "1. 단일 노드 실추론 기준치 (WebLLM)", status: "todo", note: "", items: ["로컬 HTML로 Qwen2.5 0.5B 로드 및 tok/s 측정", "Llama 3.2 1B·3B tok/s 측정", "Llama 3.1 8B q4 적재 시도와 VRAM 한계 기록", "측정값과 시뮬레이터 예측의 오차 비교"] },
+  { id: "p2", title: "2. 브라우저 노드 2개 연결", status: "todo", note: "", items: ["Sites room으로 두 기기 자동 연결", "로컬 HTML에서 WebRTC 수동 시그널링 연결", "10분 동안 RTT·핑 손실·지터 기록", "room 중계와 WebRTC 직접 연결의 RTT 차이 기록"] },
+  { id: "p3", title: "3. 요청 단위 분배 (데이터 병렬)", status: "todo", note: "", items: ["라운드 로빈, 부하 최소, 지연 최소, 예상 속도 가중 전략 비교", "동시 실행 수에 따른 처리량 변화 측정", "이기종 노드(노트북+내장 GPU) 혼합 시 꼬리 지연(p95) 확인"] },
+  { id: "p4", title: "4. 레이어 분할 시뮬레이션 (파이프라인)", status: "todo", note: "", items: ["14B 모델을 2~3노드에 레이어 분할 배치", "토큰당 네트워크 비용(RTT 합)이 tok/s에 주는 영향 확인", "단일 노드 8B와 분할 14B의 체감 속도 비교"] },
+  { id: "p5", title: "5. 장애 내성", status: "todo", note: "", items: ["실행 중 노드 탭 닫기 → 재시도/재배치 확인", "시간 초과 값과 재시도 횟수 조합 비교", "불안정 노드(안정성 점수 낮음) 자동 배제 기준 정하기"] },
+  { id: "p6", title: "6. 실측 파이프라인 (연구 과제)", status: "todo", note: "", items: ["WebGPU에서 트랜스포머 블록 단위 실행 가능성 조사", "활성값 직렬화 크기 측정 (hidden size × fp16)", "DataChannel 처리량으로 토큰당 전송 시간 추정"] }
+];
+function phases() {
+  const stored = S.meta.phases?.list;
+  if (Array.isArray(stored) && stored.length) return stored;
+  return DEFAULT_PHASES.map(p => ({ ...p, items: p.items.map(t => ({ text: t, done: false })) }));
+}
+let phaseSaveT;
+function savePhases(list) {
+  S.meta.phases = { ...(S.meta.phases || {}), list }; schedule();
+  clearTimeout(phaseSaveT); $("#poc-saved").textContent = "저장 중…";
+  phaseSaveT = setTimeout(() => Store.put("meta", "phases", { list, updatedAt: Date.now() }).then(() => $("#poc-saved").textContent = "저장됨").catch(() => $("#poc-saved").textContent = "저장 실패"), 500);
+}
+function renderPoc() {
+  const el = $("#phases"); if (el.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA") return;
+  el.innerHTML = phases().map((p, i) => {
+    const done = p.items.filter(x => x.done).length;
+    return `<div class="phase"><div class="phase-h"><b>${esc(p.title)}</b><span class="small muted">${done}/${p.items.length}</span>
+      <select data-phase-status="${i}" aria-label="상태">${[["todo", "예정"], ["doing", "진행 중"], ["done", "완료"], ["blocked", "막힘"]].map(([v, l]) => `<option value="${v}" ${p.status === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+      <div class="bar"><i style="width:${p.items.length ? done / p.items.length * 100 : 0}%"></i></div>
+      <ul>${p.items.map((it, j) => `<li><label class="check small"><input type="checkbox" data-phase-item="${i}:${j}" ${it.done ? "checked" : ""}> ${esc(it.text)}</label></li>`).join("")}</ul>
+      <textarea data-phase-note="${i}" placeholder="관찰, 측정값, 막힌 점" aria-label="메모">${esc(p.note || "")}</textarea></div>`;
+  }).join("");
+}
+
+// ---------- 설계 메모 ----------
+const DEFAULT_NOTES = [
+  { a: "노드 런타임", s: "설치형 서버 프로세스(Python + CUDA). GPU 드라이버와 패키지 설치 필요", o: "브라우저 탭 하나가 노드. WebGPU(없으면 CPU 프로필). 설치 없음", i: "참여 문턱은 낮지만 VRAM 사용량을 직접 제어하거나 알 수 없음" },
+  { a: "피어 탐색·연결", s: "DHT/libp2p 계열로 피어를 찾고 직접 연결", o: "Sites room 중계(자동) + WebRTC DataChannel(로컬 실행, 수동 시그널링)", i: "Sites 안에서는 중계 지연이 RTT에 포함됨. 직접 연결은 로컬 HTML에서만 측정 가능" },
+  { a: "분할 단위", s: "트랜스포머 블록 묶음을 노드마다 맡는 파이프라인", o: "요청 단위 분배는 실제 실행, 레이어 분할은 측정 RTT 기반 시뮬레이션", i: "블록 단위 WebGPU 실행은 6단계 연구 과제로 분리" },
+  { a: "메모리 한계", s: "서버 GPU VRAM 거의 전부 사용 가능", o: "WebGPU maxBufferSize와 OS 점유를 빼면 8GB 노트북은 약 5.6GB로 가정", i: "8B q4가 단독 적재 경계선. 14B는 분할이 필요" },
+  { a: "토폴로지", s: "클라이언트가 단계 서버들을 차례로 거치는 체인", o: "코디네이터(요청한 탭) 중심의 별형. 토큰마다 각 단계와 왕복", i: "토큰당 비용 = 단계별 RTT 합. 노드가 늘수록 불리" },
+  { a: "장애 처리", s: "경로를 다시 찾아 실패한 블록을 다른 서버로 대체", o: "시간 초과 후 해당 노드를 빼고 다시 계획(재시도 횟수 설정)", i: "중간 상태(KV 캐시) 이전은 다루지 않음" },
+  { a: "신뢰·보안", s: "공개 스웜 참여를 전제로 한 검증 장치", o: "같은 조직 참여자 전제. 프롬프트가 평문으로 전달됨", i: "민감한 프롬프트는 PoC에서 쓰지 않음" },
+  { a: "목표", s: "큰 모델을 여러 GPU로 실제 서비스", o: "브라우저 분산 추론의 가능성과 한계를 측정·기록하는 관리 도구", i: "처리량보다 측정 재현성과 비교 가능성을 우선" }
+];
+function notes() { const n = S.meta.notes?.rows; return Array.isArray(n) && n.length ? n : DEFAULT_NOTES; }
+let noteSaveT;
+function saveNotes(rows) {
+  S.meta.notes = { ...(S.meta.notes || {}), rows };
+  clearTimeout(noteSaveT); $("#note-saved").textContent = "저장 중…";
+  noteSaveT = setTimeout(() => Store.put("meta", "notes", { rows, updatedAt: Date.now() }).then(() => $("#note-saved").textContent = "저장됨").catch(() => $("#note-saved").textContent = "저장 실패"), 600);
+}
+function renderNotes() {
+  const el = $("#notes-body"); if (el.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA") return;
+  el.innerHTML = notes().map((r, i) => `<tr>${["a", "s", "o", "i"].map(k => `<td class="wrap"><textarea data-note="${i}:${k}" aria-label="${k}" style="min-height:${k === "a" ? 44 : 64}px">${esc(r[k])}</textarea></td>`).join("")}<td><button class="danger" data-note-del="${i}">삭제</button></td></tr>`).join("");
+}
+
+// ---------- 내보내기·가져오기 ----------
+async function exportJSON() {
+  const data = { kind: "browser-swarm-poc", version: 1, exportedAt: new Date().toISOString(), experiments: S.experiments, runs: S.runs, phases: phases(), notes: notes() };
+  const text = JSON.stringify(data, null, 2);
+  const dl = await use("downloads");
+  if (dl) { try { await dl.save({ filename: `swarm-poc-${new Date().toISOString().slice(0, 10)}.json`, data: text }); toast("파일을 저장했습니다"); return; } catch (e) { if (e?.code !== "unavailable") { toast("저장을 취소했습니다"); return; } } }
+  try { await navigator.clipboard.writeText(text); toast("JSON을 클립보드에 복사했습니다"); }
+  catch { $("#import-panel").hidden = false; $("#import-text").value = text; $("#import-text").select(); toast("아래 상자의 내용을 복사하세요"); }
+}
+async function importJSON() {
+  let d; try { d = JSON.parse($("#import-text").value); } catch { toast("JSON 형식이 아닙니다"); return; }
+  if (d.kind !== "browser-swarm-poc") { toast("이 도구에서 내보낸 파일이 아닙니다"); return; }
+  let n = 0;
+  for (const x of d.experiments || []) if (x?.id && x.config && MODELS[x.config.model]) { await Store.put("experiments", String(x.id).slice(0, 60), x); n++; }
+  for (const x of d.runs || []) if (x?.id) { await Store.put("runs", String(x.id).slice(0, 60), x); n++; }
+  if (Array.isArray(d.phases)) savePhases(d.phases);
+  if (Array.isArray(d.notes)) saveNotes(d.notes);
+  toast(`${n}건을 가져왔습니다`); $("#import-text").value = "";
+}
+
+// ---------- 이벤트 ----------
+function fillSelect(sel, obj, labelFn) { sel.innerHTML = Object.entries(obj).map(([k, v]) => `<option value="${k}">${esc(labelFn(v, k))}</option>`).join(""); }
+function bind() {
+  fillSelect($("#me-preset"), PRESETS, v => v.label);
+  for (const s of ["#q-model", "#e-model"]) fillSelect($(s), MODELS, v => v.label);
+  for (const s of ["#q-strategy", "#e-strategy"]) fillSelect($(s), STRATEGIES, v => v);
+  $("#webllm-model").innerHTML = Object.entries(MODELS).filter(([, m]) => m.webllm).map(([k, m]) => `<option value="${k}">${esc(m.label)}</option>`).join("");
+  $("#q-model").value = "llama3.2-1b"; $("#q-strategy").value = "weighted";
+  $("#me-name").value = S.me.name; $("#me-preset").value = S.me.preset; $("#me-vram").value = S.me.vram; $("#me-ram").value = S.me.ram;
+  $("#me-name").addEventListener("input", e => { S.me.name = e.target.value.trim().slice(0, 40) || "이름 없음"; ls.set("name", S.me.name); broadcastInfo(); });
+  $("#me-preset").addEventListener("change", e => { S.me.preset = e.target.value; const p = PRESETS[S.me.preset]; S.me.vram = p.vram; $("#me-vram").value = p.vram; ls.set("preset", S.me.preset); ls.set("vram", p.vram); broadcastInfo(); });
+  $("#me-vram").addEventListener("change", e => { S.me.vram = Math.max(0, +e.target.value || 0); ls.set("vram", S.me.vram); broadcastInfo(); });
+  $("#me-ram").addEventListener("change", e => { S.me.ram = Math.max(1, +e.target.value || 8); ls.set("ram", S.me.ram); broadcastInfo(); });
+  $("#me-accept").addEventListener("change", e => { S.me.accept = e.target.checked; broadcastInfo(); });
+  $("#btn-gpu").addEventListener("click", detectGPU);
+  $("#btn-bw").addEventListener("click", measureBandwidth);
+  $("#btn-webllm").addEventListener("click", loadWebLLM);
+  $("#rtc-offer").addEventListener("click", () => rtcMakeOffer().catch(e => toast("오퍼 생성 실패: " + e.message)));
+  $("#rtc-answer").addEventListener("click", () => rtcMakeAnswer().catch(e => toast("응답 생성 실패: " + e.message)));
+  $("#rtc-apply").addEventListener("click", rtcApplyAnswer);
+  const copy = sel => () => { const t = $(sel); navigator.clipboard.writeText(t.value).then(() => toast("복사했습니다")).catch(() => { t.select(); toast("선택된 텍스트를 복사하세요"); }); };
+  $("#rtc-copy-offer").addEventListener("click", copy("#rtc-offer-out"));
+  $("#rtc-copy-answer").addEventListener("click", copy("#rtc-answer-out"));
+  // 큐
+  $("#q-add").addEventListener("click", () => {
+    enqueue({ model: $("#q-model").value, strategy: $("#q-strategy").value, prompt: $("#q-prompt").value, promptTokens: +$("#q-ptok").value || 64, maxTokens: Math.min(2048, +$("#q-max").value || 128),
+      count: Math.min(200, Math.max(1, +$("#q-count").value || 1)), speed: +$("#q-speed").value, real: true, retries: 1, timeoutSec: 60 });
+    log("i", `수동 요청 ${$("#q-count").value}건 추가`);
+  });
+  $("#q-pause").addEventListener("click", () => { S.paused = !S.paused; if (!S.paused) pump(); schedule(); });
+  $("#q-clear").addEventListener("click", () => { S.queue = S.queue.filter(q => q.status === "queued" || q.status === "running"); schedule(); });
+  $("#q-save").addEventListener("click", async () => {
+    const fin = S.queue.filter(q => !q.runId && (q.status === "done" || q.status === "failed"));
+    if (!fin.length) { toast("저장할 완료 항목이 없습니다 (실험 실행분은 자동 저장됨)"); return; }
+    const results = fin.map(resultRow).slice(0, 200);
+    const models = [...new Set(results.map(r => r.model))], strats = [...new Set(results.map(r => r.strategy))];
+    const id = uid("run");
+    const span = results.reduce((s, r) => s + (r.e2eMs || 0), 0) / Math.max(1, +$("#q-conc").value || 1);
+    await Store.put("runs", id, { id, createdAt: Date.now(), expId: null, name: "수동 큐 " + timeStr(Date.now()), config: { model: models.length === 1 ? models[0] : null, strategy: strats.length === 1 ? strats[0] : null, count: results.length, concurrency: +$("#q-conc").value },
+      nodes: swarmSnapshot(), status: "done", storeMode: S.storeMode, results, summary: summarize(results, span), log: S.log.slice(-200).map(l => ({ ...l, msg: String(l.msg).slice(0, 300) })) });
+    toast("실행 기록으로 저장했습니다");
+  });
+  for (const s of ["#q-model", "#q-strategy"]) $(s).addEventListener("change", schedule);
+  // 실험
+  $("#exp-new").addEventListener("click", () => { fillExpForm(null); schedule(); });
+  for (const s of ["#e-model", "#e-strategy"]) $(s).addEventListener("change", () => { if (!S.editingExp && !$("#e-name").dataset.touched) $("#e-name").value = `${MODELS[$("#e-model").value].label} · ${STRATEGIES[$("#e-strategy").value]}`; });
+  $("#e-name").addEventListener("input", e => e.target.dataset.touched = "1");
+  $("#e-save").addEventListener("click", () => saveExp().catch(() => {}));
+  $("#e-run").addEventListener("click", () => saveExp().then(startRun).catch(() => {}));
+  $("#exp-list").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    const find = id => S.experiments.find(x => x.id === id);
+    if (b.dataset.run) startRun(find(b.dataset.run));
+    else if (b.dataset.edit) { fillExpForm(find(b.dataset.edit)); schedule(); }
+    else if (b.dataset.dup) { const x = find(b.dataset.dup); const id = uid("exp"); Store.put("experiments", id, { ...x, id, name: x.name + " (복제)", createdAt: Date.now() }); }
+    else if (b.dataset.del) armDelete(b, () => { Store.del("experiments", b.dataset.del); if (S.editingExp === b.dataset.del) fillExpForm(null); });
+  });
+  // 실행 기록
+  $("#runs-body").addEventListener("change", e => {
+    const id = e.target.dataset.sel; if (!id) return;
+    S.selectedRuns = e.target.checked ? [...S.selectedRuns.filter(x => x !== id), id].slice(-2) : S.selectedRuns.filter(x => x !== id); schedule();
+  });
+  $("#runs-body").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.open) { S.openRun = S.openRun === b.dataset.open ? null : b.dataset.open; schedule(); }
+    else if (b.dataset.delrun) armDelete(b, () => { Store.del("runs", b.dataset.delrun); S.selectedRuns = S.selectedRuns.filter(x => x !== b.dataset.delrun); });
+  });
+  $("#btn-export").addEventListener("click", exportJSON);
+  $("#btn-import-toggle").addEventListener("click", () => { $("#import-panel").hidden = !$("#import-panel").hidden; });
+  $("#btn-import").addEventListener("click", importJSON);
+  $("#import-file").addEventListener("change", e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => $("#import-text").value = r.result; r.readAsText(f); });
+  // PoC
+  $("#phases").addEventListener("change", e => {
+    const list = JSON.parse(JSON.stringify(phases()));
+    if (e.target.dataset.phaseStatus != null) list[+e.target.dataset.phaseStatus].status = e.target.value;
+    else if (e.target.dataset.phaseItem) { const [i, j] = e.target.dataset.phaseItem.split(":").map(Number); list[i].items[j].done = e.target.checked; }
+    else return;
+    savePhases(list);
+  });
+  $("#phases").addEventListener("input", e => { if (e.target.dataset.phaseNote == null) return; const list = JSON.parse(JSON.stringify(phases())); list[+e.target.dataset.phaseNote].note = e.target.value.slice(0, 3000); savePhases(list); });
+  $("#phases").addEventListener("focusout", () => setTimeout(schedule, 0));
+  // 메모
+  $("#notes-body").addEventListener("input", e => { if (!e.target.dataset.note) return; const [i, k] = e.target.dataset.note.split(":"); const rows = JSON.parse(JSON.stringify(notes())); rows[+i][k] = e.target.value.slice(0, 2000); saveNotes(rows); });
+  $("#notes-body").addEventListener("focusout", () => setTimeout(schedule, 0));
+  $("#notes-body").addEventListener("click", e => { const b = e.target.closest("[data-note-del]"); if (!b) return; armDelete(b, () => { const rows = notes().filter((_, i) => i !== +b.dataset.noteDel); saveNotes(rows); schedule(); }); });
+  $("#note-add").addEventListener("click", () => { saveNotes([...notes(), { a: "새 항목", s: "", o: "", i: "" }]); schedule(); });
+  window.addEventListener("hashchange", schedule);
+}
+function armDelete(btn, fn) {
+  if (btn.classList.contains("armed")) { fn(); return; }
+  btn.classList.add("armed"); const old = btn.textContent; btn.textContent = "한 번 더 누르면 삭제";
+  setTimeout(() => { btn.classList.remove("armed"); btn.textContent = old; }, 3000);
+}
+
+// ---------- 시작 ----------
+bind(); fillExpForm(null);
+log("i", `노드 시작: ${S.me.name} (${S.me.ua})`);
+if (!S.rtcAvailable) log("d", "WebRTC를 쓸 수 없는 환경입니다 (Sites 페이지 안에서는 정상). room 중계를 사용합니다.");
+render();
+detectGPU();
+Store.init();
+initRoom();
+setInterval(pingAll, 3000);
+setInterval(schedule, 2000);
+</script>
