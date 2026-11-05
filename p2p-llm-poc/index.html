@@ -65,7 +65,9 @@ nav.tabs a:hover { background: var(--sunk) }
 nav.tabs a[aria-current="page"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); font-weight: 600 }
 nav.tabs .n { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted) }
 main { min-width: 0 }
-section.view { display: grid; gap: 18px }
+section.view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px }
+.guide details.panel { display: block; overflow: hidden }
+.guide details.panel > * + * { margin-top: 10px }
 .view-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: end; justify-content: space-between }
 .view-head p { margin: 4px 0 0; max-width: 68ch }
 
@@ -126,6 +128,14 @@ td.wrap { white-space: normal; min-width: 220px }
 .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted) }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px }
 details summary { cursor: pointer }
+.guide { display: grid; gap: 12px }
+.guide .panel { max-width: 860px }
+.guide p, .guide li { max-width: 72ch }
+.guide p { margin: 0 }
+.guide ol, .guide ul { margin: 0; padding-left: 20px; display: grid; gap: 4px }
+.guide details.panel > summary { font-weight: 600; font-size: 14px; list-style-position: inside }
+.guide details.panel[open] > summary { margin-bottom: 4px }
+.guide kbd { font-family: var(--font-mono); font-size: 12px; background: var(--sunk); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px }
 
 @media (max-width: 820px) {
   .shell { grid-template-columns: minmax(0, 1fr); gap: 14px }
@@ -156,6 +166,7 @@ details summary { cursor: pointer }
     <a href="#models" data-v="models">모델 비교 <span class="n" id="n-models"></span></a>
     <a href="#poc" data-v="poc">PoC 단계 <span class="n" id="n-poc"></span></a>
     <a href="#notes" data-v="notes">설계 메모 <span class="n" id="n-notes"></span></a>
+    <a href="#guide" data-v="guide">사용법 <span class="n"></span></a>
   </nav>
 
   <main>
@@ -387,6 +398,110 @@ details summary { cursor: pointer }
         <thead><tr><th>항목</th><th>SwarmLLM</th><th>현재 설계 (Browser Swarm PoC)</th><th>PoC에 주는 영향</th><th></th></tr></thead>
         <tbody id="notes-body"></tbody>
       </table></div>
+    </section>
+
+    <!-- 사용법 -->
+    <section class="view guide" id="v-guide" hidden>
+      <div class="view-head">
+        <div><h2>사용법</h2><p class="muted">처음 쓰는 순서와 화면별 사용법입니다. 전체 설명서는 저장소의 <code>p2p-llm-poc/GUIDE.md</code>에 있습니다.</p></div>
+      </div>
+      <div class="notice info" id="guide-mode"></div>
+
+      <div class="panel">
+        <h3>빠른 시작</h3>
+        <ol>
+          <li><a href="#nodes">노드</a> 화면에서 노드 이름과 하드웨어 프로필을 정합니다. VRAM은 브라우저가 알려주지 않으므로 직접 입력합니다.</li>
+          <li><b>WebGPU 다시 감지</b>와 <b>GPU 대역폭 측정</b>을 누릅니다. 노트북은 충전기를 연결한 상태에서 측정합니다.</li>
+          <li>다른 기기에서도 이 페이지를 엽니다. Sites에서는 자동으로 연결되고, 로컬에서는 <a href="#connect">연결</a> 화면에서 코드를 주고받습니다.</li>
+          <li><a href="#experiments">실험 설정</a>에서 <code>[예시]</code> 설정을 골라 <b>실행</b>을 누릅니다.</li>
+          <li><a href="#runs">실행 기록</a>에서 실행 두 개를 골라 비교하고, 결과를 <a href="#poc">PoC 단계</a> 메모에 적습니다.</li>
+        </ol>
+      </div>
+
+      <details class="panel" open>
+        <summary>실행 방식: Sites와 로컬</summary>
+        <div class="table-wrap"><table>
+          <thead><tr><th></th><th>Sites에서 열기</th><th>로컬에서 열기</th></tr></thead>
+          <tbody>
+            <tr><td>노드 연결</td><td>room 중계, 자동</td><td>WebRTC 직접 연결, 코드 교환</td></tr>
+            <tr><td>저장</td><td>공유 DB (참여자 모두 같은 데이터)</td><td>이 브라우저에만</td></tr>
+            <tr><td>WebLLM 실추론</td><td>가중치 다운로드가 막힐 수 있음</td><td>가능</td></tr>
+            <tr><td>RTT</td><td>Sites 중계 지연 포함</td><td>기기 사이 실제 지연</td></tr>
+          </tbody>
+        </table></div>
+        <p class="small">로컬 실행: <code>index.html</code>이 있는 폴더에서 <code>python -m http.server 8000</code>을 실행하고 <code>http://localhost:8000</code>을 엽니다. 다른 기기에서 IP 주소로 접속하면 WebGPU가 꺼지므로, 노드마다 자기 기기에서 <code>localhost</code>로 엽니다.</p>
+        <p class="small">Sites에서 작업을 주고받으려면 공유 메뉴에서 참여자에게 Contributor 이상 권한을 줘야 합니다.</p>
+      </details>
+
+      <details class="panel">
+        <summary>RTX 4070을 브라우저에 연결하기 (Windows 11)</summary>
+        <ol>
+          <li><b>설정 &gt; 시스템 &gt; 디스플레이 &gt; 그래픽</b>에서 Chrome 또는 Edge를 <b>고성능</b>으로 지정합니다.</li>
+          <li>브라우저를 완전히 닫았다가 다시 엽니다.</li>
+          <li><code>chrome://gpu</code> (Edge는 <code>edge://gpu</code>)에서 WebGPU가 <i>Hardware accelerated</i>인지 확인합니다.</li>
+          <li>노드 카드의 GPU 항목에 NVIDIA가 보이면 됩니다. Intel이 보이면 1번을 다시 확인합니다.</li>
+        </ol>
+      </details>
+
+      <details class="panel">
+        <summary>WebRTC 수동 연결 (로컬)</summary>
+        <ol>
+          <li>A: <b>1. 오퍼 만들기</b> → <b>복사</b> → B에게 전달</li>
+          <li>B: 받은 코드를 붙여넣고 <b>2. 응답 만들기</b> → <b>복사</b> → A에게 전달</li>
+          <li>A: 응답 코드를 붙여넣고 <b>3. 응답 적용</b></li>
+          <li>양쪽 노드 화면에 상대가 나타나면 연결된 것입니다.</li>
+        </ol>
+        <p class="small muted">노드가 셋 이상이면 작업을 보내는 노드가 모든 작업 노드와 각각 연결해야 합니다. 응답은 가장 최근 오퍼에 대해 만들어야 합니다.</p>
+      </details>
+
+      <details class="panel">
+        <summary>분배 전략</summary>
+        <div class="table-wrap"><table>
+          <thead><tr><th>전략</th><th>동작</th></tr></thead>
+          <tbody>
+            <tr><td>내 노드만</td><td class="wrap">이 탭에서만 실행. 단일 노드 기준선</td></tr>
+            <tr><td>라운드 로빈</td><td class="wrap">모델을 올릴 수 있는 노드에 차례로 배정</td></tr>
+            <tr><td>부하 최소</td><td class="wrap">실행 중인 작업이 가장 적은 노드</td></tr>
+            <tr><td>지연 최소</td><td class="wrap">RTT가 가장 낮은 노드</td></tr>
+            <tr><td>예상 속도 가중</td><td class="wrap">예상 tok/s ÷ (1 + 현재 부하)가 가장 큰 노드</td></tr>
+            <tr><td>레이어 분할</td><td class="wrap">가용 메모리가 큰 노드부터 골라 레이어를 메모리 비율로 나눔. 한 노드에 안 들어가는 모델용</td></tr>
+          </tbody>
+        </table></div>
+        <p class="small">실패하거나 시간 초과가 나면 그 노드를 빼고 다시 배정합니다. 배속을 올리면 기다리는 시간만 줄고, 표의 TTFT와 tok/s는 1× 기준 예측값입니다.</p>
+      </details>
+
+      <details class="panel">
+        <summary>지표 읽는 법</summary>
+        <dl class="kv" style="font-size:13px">
+          <dt>TTFT</dt><dd style="font-family:var(--font-ui);text-align:left">첫 토큰까지 걸린 시간 (프리필 + 네트워크 RTT)</dd>
+          <dt>tok/s</dt><dd style="font-family:var(--font-ui);text-align:left">디코딩 속도</dd>
+          <dt>E2E · p95</dt><dd style="font-family:var(--font-ui);text-align:left">요청 하나의 전체 시간, 95%가 이 안에 끝나는 꼬리 지연</dd>
+          <dt>처리량</dt><dd style="font-family:var(--font-ui);text-align:left">실행 전체에서 초당 생성한 토큰 (동시 실행 효과 포함)</dd>
+          <dt>안정성</dt><dd style="font-family:var(--font-ui);text-align:left">최근 핑 20회의 성공률 × 지터 감점. 0.85 초과 안정, 0.6 초과 불안정, 그 이하 나쁨</dd>
+        </dl>
+        <p class="small muted">예측 tok/s = 유효 대역폭 ÷ 가중치 크기. 대역폭을 측정하면 측정값의 60%를 씁니다. 레이어 분할은 토큰마다 단계별 RTT를 더합니다.</p>
+      </details>
+
+      <details class="panel">
+        <summary>데이터 옮기기</summary>
+        <p class="small">로컬에서 측정한 결과를 팀과 공유하려면 <a href="#runs">실행 기록</a>에서 <b>JSON 내보내기</b> → Sites 페이지의 같은 화면에서 <b>가져오기</b>를 합니다. 같은 ID는 덮어쓰고, PoC 단계와 설계 메모는 가져온 내용으로 바뀝니다.</p>
+      </details>
+
+      <details class="panel">
+        <summary>문제 해결</summary>
+        <div class="table-wrap"><table>
+          <thead><tr><th>증상</th><th>해결</th></tr></thead>
+          <tbody>
+            <tr><td class="wrap">WebGPU 없음</td><td class="wrap">고성능 GPU 지정, <code>chrome://gpu</code> 확인, IP 주소 대신 localhost로 열기</td></tr>
+            <tr><td class="wrap">Sites에서 다른 노드가 안 보임</td><td class="wrap">상대가 같은 주소를 열었는지, 공유 권한이 있는지, 상단 room 칩 상태 확인</td></tr>
+            <tr><td class="wrap">작업이 바로 실패 (Sites)</td><td class="wrap">참여자 권한이 Contributor 이상인지 확인</td></tr>
+            <tr><td class="wrap">적재 가능한 노드가 없음</td><td class="wrap">더 작은 모델, 레이어 분할 전략, 노드 추가</td></tr>
+            <tr><td class="wrap">WebRTC가 connecting에서 멈춤</td><td class="wrap">최근 오퍼에 대한 응답인지 확인. 다른 네트워크면 같은 LAN에서 재시도 (TURN 미지원)</td></tr>
+            <tr><td class="wrap">WebLLM 불러오기 실패</td><td class="wrap">Sites라면 로컬 서버로 열기. 로컬이라면 더 작은 모델부터 시도</td></tr>
+            <tr><td class="wrap">핑 손실이 많음</td><td class="wrap">Wi-Fi 신호, 절전 모드 확인. 백그라운드 탭은 브라우저가 타이머를 늦춤</td></tr>
+          </tbody>
+        </table></div>
+      </details>
     </section>
   </main>
 </div>
@@ -902,7 +1017,7 @@ function render() {
   $("#n-experiments").textContent = S.experiments.length || "";
   $("#n-runs").textContent = S.runs.length || "";
   const ph = phases(); $("#n-poc").textContent = `${ph.filter(p => p.status === "done").length}/${ph.length}`;
-  ({ overview: renderOverview, nodes: renderNodes, connect: renderConnect, queue: renderQueue, experiments: renderExperiments, runs: renderRuns, models: renderModels, poc: renderPoc, notes: renderNotes })[view]();
+  ({ overview: renderOverview, nodes: renderNodes, connect: renderConnect, queue: renderQueue, experiments: renderExperiments, runs: renderRuns, models: renderModels, poc: renderPoc, notes: renderNotes, guide: renderGuide })[view]();
 }
 function renderChips() {
   const room = S.room ? (S.roomOk ? "ok" : "warn") : "bad";
@@ -1112,6 +1227,15 @@ function barChart(rows) {
     else s += `<text x="${padL + 4}" y="${y + 28}" font-size="11" fill="var(--muted)">실행 불가</text>`;
   });
   return s + `</svg>`;
+}
+
+function renderGuide() {
+  const el = $("#guide-mode");
+  el.textContent = S.room
+    ? `지금 Sites에서 열려 있습니다. 노드는 room 중계로 자동 연결되고, 데이터는 ${S.storeMode}에 저장됩니다. WebRTC 직접 연결과 실추론은 로컬 실행에서 하세요.`
+    : S.rtcAvailable
+      ? `지금 로컬에서 열려 있습니다. 노드는 연결 화면에서 WebRTC 코드를 주고받아 연결하고, 데이터는 ${S.storeMode}에 저장됩니다.`
+      : `room과 WebRTC를 모두 쓸 수 없는 환경입니다. 혼자 시뮬레이션만 할 수 있습니다.`;
 }
 
 // ---------- PoC 단계 ----------
